@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { getBackend, type Backend } from '../backend';
 import type { AuthUser, DoctorProfile, Transfer, Unsub, WardDoc } from '../backend/types';
 import { findHospital } from '../data/hospitals';
-import { useNow } from '../lib/hooks';
+import { useNow, useStoredState } from '../lib/hooks';
 
 export type WardStatus = 'open' | 'emergency' | 'full' | 'unknown';
 
@@ -28,14 +28,22 @@ interface AppState {
   user: AuthUser | null;
   /** undefined while loading, null when signed in but not registered yet. */
   profile: DoctorProfile | null | undefined;
-  /** Registered and approved by an admin. Pending doctors are treated like patients. */
+  /** Registered and approved. Pending doctors are treated like patients. */
   isDoctor: boolean;
-  isAdmin: boolean;
+  /** Approved ward in-charge: approves doctors of their own ward. */
+  isIncharge: boolean;
+  /** The app owner (Gmail listed in config/admins): approves in-charges, and anyone asking for a new ward. */
+  isSuperAdmin: boolean;
   /** False until the admin check for the signed-in user has finished. */
   adminChecked: boolean;
+  /** What this device chose on the welcome screen; null before the first choice. */
+  mode: Mode | null;
+  setMode: (m: Mode | null) => void;
   toast: (msg: string) => void;
   endDutyAndSignOut: () => Promise<void>;
 }
+
+export type Mode = 'patient' | 'doctor';
 
 const Ctx = createContext<AppState | null>(null);
 
@@ -54,7 +62,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [authReady, setAuthReady] = useState(false);
   const [user, setUser] = useState<AuthUser | null>(null);
   const [profile, setProfile] = useState<DoctorProfile | null | undefined>(undefined);
-  const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
+  const [isSuperAdmin, setIsSuperAdmin] = useState<boolean | null>(null);
+  const [mode, setMode] = useStoredState<Mode | null>('careq-mode', null);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const now = useNow(30_000);
 
@@ -86,14 +95,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [backend, user]);
 
   useEffect(() => {
-    setIsAdmin(null);
+    setIsSuperAdmin(null);
     if (!backend || !user) return;
     let cancelled = false;
-    backend.isAdmin().then((a) => !cancelled && setIsAdmin(a));
+    backend.isSuperAdmin().then((a) => !cancelled && setIsSuperAdmin(a));
     return () => {
       cancelled = true;
     };
   }, [backend, user]);
+
+  // Whoever signs in on this phone is a doctor here; logging out then lands on the login screen.
+  useEffect(() => {
+    if (user && mode !== 'doctor') setMode('doctor');
+  }, [user, mode, setMode]);
 
   const toastTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const toast = useCallback((msg: string) => {
@@ -128,12 +142,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
       user,
       profile,
       isDoctor: Boolean(user && profile?.approved),
-      isAdmin: isAdmin === true,
-      adminChecked: !user || isAdmin !== null,
+      isIncharge: Boolean(user && profile?.approved && profile.role === 'incharge'),
+      isSuperAdmin: isSuperAdmin === true,
+      adminChecked: !user || isSuperAdmin !== null,
+      mode,
+      setMode,
       toast,
       endDutyAndSignOut,
     }),
-    [backend, now, authReady, user, profile, isAdmin, toast, endDutyAndSignOut],
+    [backend, now, authReady, user, profile, isSuperAdmin, mode, setMode, toast, endDutyAndSignOut],
   );
 
   return (

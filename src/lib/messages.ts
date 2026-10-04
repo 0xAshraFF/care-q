@@ -6,6 +6,21 @@ import { normalizeBdMobile, toBnDigits } from './bn';
 export const BLOOD_GROUPS = ['A+', 'A-', 'B+', 'B-', 'O+', 'O-', 'AB+', 'AB-'] as const;
 export type BloodGroup = (typeof BLOOD_GROUPS)[number];
 
+/**
+ * Red-cell compatibility: which donor groups a patient of each group can receive. Standard ABO/Rh
+ * table; the blood bank's cross-match has the final say.
+ */
+export const CAN_RECEIVE_FROM: Record<BloodGroup, BloodGroup[]> = {
+  'O-': ['O-'],
+  'O+': ['O+', 'O-'],
+  'A-': ['A-', 'O-'],
+  'A+': ['A+', 'A-', 'O+', 'O-'],
+  'B-': ['B-', 'O-'],
+  'B+': ['B+', 'B-', 'O+', 'O-'],
+  'AB-': ['AB-', 'A-', 'B-', 'O-'],
+  'AB+': ['AB+', 'AB-', 'A+', 'A-', 'B+', 'B-', 'O+', 'O-'],
+};
+
 export const WHEN_OPTIONS = ['এখনই', 'আজকেই', 'আগামীকাল'] as const;
 export type When = (typeof WHEN_OPTIONS)[number];
 

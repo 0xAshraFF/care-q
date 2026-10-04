@@ -1,15 +1,25 @@
 import { ArrowDown, PenLine, Phone } from 'lucide-react';
 import { useRef, useState, type ReactNode } from 'react';
-import { ContactList } from '../components/ContactList';
+import { ContactList, InfoCard, RateNote } from '../components/ContactList';
 import { ShareBar } from '../components/ShareBar';
 import { ChipGroup, Field, PageTitle } from '../components/ui';
-import { BLOOD_CONTACTS, ICU_CONTACTS, OXYGEN_CONTACTS, type Contact } from '../data/directory';
+import {
+  AMBULANCE_CONTACTS,
+  AMBULANCE_RATES,
+  BLOOD_CONTACTS,
+  ICU_CONTACTS,
+  OXYGEN_CONTACTS,
+  OXYGEN_RATES,
+  type Contact,
+  type MarketRate,
+} from '../data/directory';
 import { DEFAULT_HOSPITAL } from '../data/hospitals';
 import { isValidBdMobile, toBnDigits, toEnDigits } from '../lib/bn';
 import { useStoredState } from '../lib/hooks';
 import { useWards } from '../state/app';
 import {
   BLOOD_GROUPS,
+  CAN_RECEIVE_FROM,
   ICU_TYPES,
   OXYGEN_TYPES,
   WHEN_OPTIONS,
@@ -22,48 +32,59 @@ import {
   type When,
 } from '../lib/messages';
 
-/** One scrolling page: numbers to call first, then the post maker. No tabs to switch. */
+/** One scrolling page: numbers to call first, then what it costs, the post maker, and good-to-know. */
 function ResourcePage({
   title,
   subtitle,
   contacts,
   tip,
+  rate,
   form,
+  info,
 }: {
   title: string;
   subtitle: string;
   contacts: Contact[];
   tip: string;
-  form: ReactNode;
+  rate?: MarketRate;
+  form?: ReactNode;
+  info?: ReactNode;
 }) {
   const postRef = useRef<HTMLElement>(null);
   return (
     <>
       <PageTitle title={title} subtitle={subtitle} />
-      <button
-        type="button"
-        className="btn btn-soft mb-5 w-full"
-        onClick={() => postRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
-      >
-        <PenLine size={19} /> পোস্ট বানাতে চান? <ArrowDown size={18} />
-      </button>
+      {form && (
+        <button
+          type="button"
+          className="btn btn-soft mb-5 w-full"
+          onClick={() => postRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+        >
+          <PenLine size={19} /> পোস্ট বানাতে চান? <ArrowDown size={18} />
+        </button>
+      )}
 
       <section className="space-y-3">
         <h2 className="flex items-center gap-2 px-1 text-[18px] font-semibold">
           <Phone size={20} className="text-brand-600" /> সরাসরি ফোন করুন
         </h2>
         <ContactList contacts={contacts} tip={tip} />
+        {rate && <RateNote rate={rate} />}
       </section>
 
-      <section ref={postRef} className="mt-8 scroll-mt-20 space-y-3">
-        <div className="px-1">
-          <h2 className="flex items-center gap-2 text-[18px] font-semibold">
-            <PenLine size={20} className="text-brand-600" /> পোস্ট বানিয়ে শেয়ার করুন
-          </h2>
-          <p className="text-[15px] text-ink-500">ঘরগুলো পূরণ করলেই লেখা তৈরি হয়ে যাবে।</p>
-        </div>
-        <div className="card">{form}</div>
-      </section>
+      {form && (
+        <section ref={postRef} className="mt-8 scroll-mt-20 space-y-3">
+          <div className="px-1">
+            <h2 className="flex items-center gap-2 text-[18px] font-semibold">
+              <PenLine size={20} className="text-brand-600" /> পোস্ট বানিয়ে শেয়ার করুন
+            </h2>
+            <p className="text-[15px] text-ink-500">ঘরগুলো পূরণ করলেই লেখা তৈরি হয়ে যাবে।</p>
+          </div>
+          <div className="card">{form}</div>
+        </section>
+      )}
+
+      {info && <div className="mt-8 space-y-3">{info}</div>}
     </>
   );
 }
@@ -158,6 +179,13 @@ function BloodForm() {
             </button>
           ))}
         </div>
+        {group && (
+          <p className="mt-2 rounded-xl bg-brand-50 px-3 py-2 text-[15px] text-ink-700">
+            {group} রোগী যাদের রক্ত নিতে পারেন:{' '}
+            <span className="font-semibold">{CAN_RECEIVE_FROM[group].join(', ')}</span>
+            <span className="block text-[13px] text-ink-500">ব্লাড ব্যাংক ক্রস-ম্যাচ করে চূড়ান্ত করবে।</span>
+          </p>
+        )}
       </fieldset>
       <ChipGroup label="কত ব্যাগ" options={[1, 2, 3, 4]} value={bags} onChange={setBags} render={(n) => `${toBnDigits(n)} ব্যাগ`} />
       <ChipGroup label="কখন লাগবে" options={WHEN_OPTIONS} value={when} onChange={setWhen} />
@@ -237,6 +265,18 @@ export function BloodPage() {
       contacts={BLOOD_CONTACTS}
       tip="ব্লাড ব্যাংকে গেলে ডাক্তারের লেখা রক্তের রিকুইজিশন স্লিপ সাথে নিন।"
       form={<BloodForm />}
+      info={
+        <InfoCard
+          title="কে রক্ত দিতে পারবেন"
+          items={[
+            'সাধারণত ১৮ থেকে ৬০ বছর বয়সী, ওজন অন্তত ৪৫ কেজি।',
+            'শেষবার রক্ত দেওয়ার পর অন্তত ৪ মাস পার হয়েছে।',
+            'জ্বর, সর্দি-কাশি বা বড় কোনো অসুখ এখন নেই।',
+            'রক্ত দেওয়ার আগে খেয়ে আসুন, পানি বেশি করে খান।',
+          ]}
+          footnote="চূড়ান্ত সিদ্ধান্ত ব্লাড ব্যাংক নেবে।"
+        />
+      }
     />
   );
 }
@@ -249,6 +289,17 @@ export function IcuPage() {
       contacts={ICU_CONTACTS}
       tip="সরকারি হাসপাতালে আইসিইউ সিট খুব কম। একসাথে কয়েক জায়গায় ফোন করুন।"
       form={<IcuForm />}
+      info={
+        <InfoCard
+          title="ফোন করার সময় যা জানাবেন"
+          items={[
+            'রোগীর বয়স আর মূল সমস্যা।',
+            'রোগী এখন কোন হাসপাতালে আছেন।',
+            'ডাক্তার অক্সিজেন বা ভেন্টিলেটরের কথা বলেছেন কি না।',
+            'বেসরকারি হাসপাতাল হলে দিনে কত খরচ, আগে জেনে নিন।',
+          ]}
+        />
+      }
     />
   );
 }
@@ -260,7 +311,43 @@ export function OxygenPage() {
       subtitle="সরবরাহকারীকে ফোন করুন, অথবা পোস্ট দিয়ে সবাইকে জানান।"
       contacts={OXYGEN_CONTACTS}
       tip="শ্বাসকষ্ট খুব বেশি হলে দেরি না করে ৯৯৯-এ ফোন করে অ্যাম্বুলেন্স ডাকুন।"
+      rate={OXYGEN_RATES}
       form={<OxygenForm />}
+      info={
+        <InfoCard
+          title="বাসায় সিলিন্ডার রাখলে সাবধান"
+          items={[
+            'সিলিন্ডারের কাছে চুলা, আগুন, সিগারেট নয়।',
+            'সিলিন্ডার খাড়া করে বেঁধে রাখুন, যেন পড়ে না যায়।',
+            'রেগুলেটর বা পাইপে তেল, গ্রিজ, লোশন লাগাবেন না।',
+            'অক্সিজেন কত লিটারে চলবে, ডাক্তার যা বলেছেন তাই রাখুন।',
+          ]}
+        />
+      }
+    />
+  );
+}
+
+export function AmbulancePage() {
+  return (
+    <ResourcePage
+      title="অ্যাম্বুলেন্স লাগবে?"
+      subtitle="সরাসরি ফোন করুন। খুব জরুরি হলে ৯৯৯।"
+      contacts={AMBULANCE_CONTACTS}
+      tip="রোগীর অক্সিজেন লাগলে বলুন অক্সিজেনসহ অ্যাম্বুলেন্স পাঠাতে।"
+      rate={AMBULANCE_RATES}
+      info={
+        <InfoCard
+          title="ফোনে যা বলবেন"
+          items={[
+            'কোথা থেকে নেবে: ঠিকানা আর কাছের চেনা জায়গা।',
+            'কোথায় যাবেন: কোন হাসপাতাল।',
+            'রোগীর অবস্থা: অজ্ঞান, শ্বাসকষ্ট, রক্তক্ষরণ কি না।',
+            'সাধারণ, অক্সিজেনসহ, না আইসিইউ অ্যাম্বুলেন্স লাগবে।',
+            'রওনার আগে ভাড়া ঠিক করে নিন।',
+          ]}
+        />
+      }
     />
   );
 }

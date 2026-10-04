@@ -1,12 +1,14 @@
 import { ChevronDown, ChevronRight, Clock, Search, Send } from 'lucide-react';
 import { useState } from 'react';
-import type { DoctorProfile } from '../backend/types';
+import type { DoctorProfile, WardState } from '../backend/types';
 import { ReferSheet } from '../components/Referrals';
-import { CallButton, CallCircle, Notice, PageTitle } from '../components/ui';
+import { CallButton, CallCircle, Notice } from '../components/ui';
 import { STATUS_META, StatusPill, bedsText } from '../components/WardStatus';
 import { DEFAULT_HOSPITAL, type Hospital } from '../data/hospitals';
-import { formatPhone, telHref, timeAgo, toBnDigits, wardNameKey } from '../lib/bn';
-import { useStoredState, type Route } from '../lib/hooks';
+import { clockTimeWithDay, formatPhone, telHref, timeAgo, toBnDigits, wardNameKey } from '../lib/bn';
+import { isOnDuty, shiftEndChoices } from '../lib/duty';
+import { askNotifyPermission } from '../lib/notify';
+import { useStoredState } from '../lib/hooks';
 import { STALE_AFTER_MS, useApp, useOnDutyDoctors, useWards, type WardStatus, type WardView } from '../state/app';
 
 type Filter = Exclude<WardStatus, 'unknown'> | 'all';
@@ -53,68 +55,46 @@ function WardCard({
   const meta = STATUS_META[ward.status];
   const stale = ward.updatedAt !== undefined && now - ward.updatedAt > STALE_AFTER_MS;
   const mine = profile?.wardId === ward.id;
-
-  const hasMeta = ward.updatedAt !== undefined || (isDoctor && doctorsHere.length > 0);
-  const chevron = <span className="text-brand-600">{open ? <ChevronDown size={20} /> : <ChevronRight size={20} />}</span>;
-  const title = (
-    <>
-      {ward.nameBn}
-      {mine && <span className="ml-1.5 text-[13px] font-medium text-brand-700">(আপনার)</span>}
-    </>
-  );
+  const canRefer = isDoctor && !mine;
 
   return (
     <li className={`card overflow-hidden border-l-4 p-0 ${meta.stripe}`}>
-      <button type="button" onClick={onToggle} aria-expanded={open} className="w-full px-4 py-3 text-left active:bg-brand-50">
-        {hasMeta ? (
-          <>
-            <div className="flex items-start gap-3">
-              <div className="min-w-0 flex-1">
-                <p className="text-[18px] leading-snug font-semibold">{title}</p>
-                <p className="text-[14px] leading-snug text-ink-500">{meta.hint}</p>
-              </div>
-              <StatusPill status={ward.status} />
-            </div>
-            <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[14px] text-ink-500">
-              {ward.updatedAt !== undefined && (
-                <span className={`inline-flex items-center gap-1 ${stale ? 'font-medium text-warn-700' : ''}`}>
-                  <Clock size={14} /> {timeAgo(ward.updatedAt, now)}
-                </span>
-              )}
-              {ward.freeBeds ? <span className="font-medium text-ok-700">{bedsText(ward.freeBeds)}</span> : null}
-              {isDoctor && ward.status !== 'full' && doctorsHere.length > 0 && (
-                <span>ডিউটিতে {toBnDigits(doctorsHere.length)} জন</span>
-              )}
-              <span className="ml-auto">{chevron}</span>
-            </div>
-          </>
-        ) : (
-          // Nobody has reported on this ward yet: one compact row.
-          <div className="flex items-center gap-3">
-            <p className="min-w-0 flex-1 text-[17px] leading-snug font-semibold">{title}</p>
+      <div className="flex items-center">
+        <button type="button" onClick={onToggle} aria-expanded={open} className="min-w-0 flex-1 px-4 py-3 text-left active:bg-brand-50">
+          <p className="flex items-center gap-1.5 text-[17px] leading-snug font-semibold">
+            <span className="min-w-0">{ward.nameBn}</span>
+            {mine && <span className="text-[13px] font-medium text-brand-700">(আপনার)</span>}
+            <span className="ml-auto shrink-0 text-ink-400">{open ? <ChevronDown size={18} /> : <ChevronRight size={18} />}</span>
+          </p>
+          <div className="mt-1.5 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[14px] text-ink-500">
             <StatusPill status={ward.status} />
-            {chevron}
+            {ward.freeBeds ? <span className="font-medium text-ok-700">{bedsText(ward.freeBeds)}</span> : null}
+            {ward.updatedAt !== undefined && (
+              <span className={`inline-flex items-center gap-1 ${stale ? 'font-medium text-warn-700' : ''}`}>
+                <Clock size={14} /> {timeAgo(ward.updatedAt, now)}
+              </span>
+            )}
           </div>
+        </button>
+        {canRefer && (
+          <button
+            type="button"
+            onClick={onRefer}
+            className="mr-3 inline-flex min-h-12 shrink-0 flex-col items-center justify-center rounded-xl border border-brand-200 bg-brand-50 px-3 text-[14px] font-semibold text-brand-700 active:bg-brand-100"
+          >
+            <Send size={18} /> রেফার
+          </button>
         )}
-      </button>
+      </div>
 
       {open && (
         <div className="space-y-3 border-t border-line px-4 py-3">
-          {stale && <Notice tone="warn">খবরটা ৬ ঘণ্টার বেশি পুরনো। রোগী নিয়ে যাওয়ার আগে ফোন করে নিশ্চিত হোন।</Notice>}
+          <p className="text-[15px] text-ink-700">{meta.hint}</p>
+          {stale && <Notice tone="warn">খবরটা ৬ ঘণ্টার বেশি পুরনো। পাঠানোর আগে ফোন করে নিশ্চিত হোন।</Notice>}
           {isDoctor ? (
-            <>
-              <OnDutyDoctors ward={ward} doctors={doctorsHere} />
-              {!mine && (
-                <button type="button" className="btn btn-primary w-full" onClick={onRefer}>
-                  <Send size={19} /> এই ওয়ার্ডে রেফার করুন
-                </button>
-              )}
-            </>
+            <OnDutyDoctors ward={ward} doctors={doctorsHere} />
           ) : (
-            <>
-              <p className="text-[15px] text-ink-700">যাওয়ার আগে নিশ্চিত হতে হাসপাতালের তথ্যকেন্দ্রে ফোন করতে পারেন।</p>
-              <CallButton phone={hospital.phone} label="হাসপাতালে ফোন" />
-            </>
+            <CallButton phone={hospital.phone} label="হাসপাতালে ফোন" />
           )}
         </div>
       )}
@@ -122,8 +102,77 @@ function WardCard({
   );
 }
 
-export function WardsPage({ go }: { go: (r: Route) => void }) {
-  const { user } = useApp();
+const QUICK: WardState[] = ['open', 'emergency', 'full'];
+const QUICK_ACTIVE: Record<WardState, string> = {
+  open: 'border-ok-600 bg-ok-600 text-white',
+  emergency: 'border-warn-600 bg-warn-600 text-white',
+  full: 'border-bad-600 bg-bad-600 text-white',
+};
+
+/** The doctor's own ward at the top of home: one tap to update it, one tap to start duty. */
+function MyWardStrip() {
+  const { backend, profile, now, toast, isDoctor } = useApp();
+  const { wards } = useWards(profile?.hospitalId ?? DEFAULT_HOSPITAL.id);
+  if (!isDoctor || !profile || !backend) return null;
+  const ward = wards.find((w) => w.id === profile.wardId);
+  if (!ward) return null;
+  const onDuty = isOnDuty(profile.dutyUntil, now);
+  const defaultEnd = shiftEndChoices(now)[0];
+
+  const setStatus = (s: WardState) =>
+    backend
+      .setWardStatus(profile.uid, profile.hospitalId, ward.id, s, s === 'full' ? null : ward.freeBeds)
+      .then(() => toast(`জানানো হয়েছে: ${STATUS_META[s].label}`))
+      .catch(() => toast('আপডেট হয়নি। আবার চেষ্টা করুন।'));
+
+  const startDuty = () => {
+    void askNotifyPermission();
+    backend.setDuty(profile.uid, defaultEnd).catch(() => toast('হয়নি। আবার চেষ্টা করুন।'));
+  };
+
+  return (
+    <section className="card space-y-3">
+      <div className="flex items-baseline justify-between gap-2">
+        <p className="text-[17px] leading-snug font-semibold">
+          <span className="text-[14px] font-normal text-ink-500">আপনার ওয়ার্ড · </span>
+          {ward.nameBn}
+        </p>
+        <p className="shrink-0 text-[13px] text-ink-500">
+          {ward.updatedAt !== undefined ? timeAgo(ward.updatedAt, now) : 'আপডেট নেই'}
+        </p>
+      </div>
+      <div className="grid grid-cols-3 gap-2">
+        {QUICK.map((s) => (
+          <button
+            key={s}
+            type="button"
+            aria-pressed={ward.status === s}
+            onClick={() => void setStatus(s)}
+            className={`min-h-12 rounded-xl border-2 px-1 text-[15px] leading-tight font-semibold ${
+              ward.status === s ? QUICK_ACTIVE[s] : `${STATUS_META[s].block} bg-white`
+            }`}
+          >
+            {s === 'emergency' ? 'ইমার্জেন্সি' : STATUS_META[s].label}
+          </button>
+        ))}
+      </div>
+      {onDuty ? (
+        <p className="flex items-center gap-2 text-[14px] font-medium text-ok-700">
+          <span className="size-2 rounded-full bg-ok-600" /> ডিউটিতে আছেন · {clockTimeWithDay(profile.dutyUntil!, now)} পর্যন্ত
+        </p>
+      ) : (
+        defaultEnd !== undefined && (
+          <button type="button" className="btn btn-soft min-h-11 w-full text-[15px]" onClick={startDuty}>
+            ডিউটি শুরু · {clockTimeWithDay(defaultEnd, now)} পর্যন্ত
+          </button>
+        )
+      )}
+    </section>
+  );
+}
+
+/** Home for doctors: their own ward up top, then every ward with a refer button. */
+export function WardsPage() {
   const hospital = DEFAULT_HOSPITAL;
   const { wards, loaded, error } = useWards(hospital.id);
   const onDuty = useOnDutyDoctors();
@@ -147,85 +196,61 @@ export function WardsPage({ go }: { go: (r: Route) => void }) {
         type="button"
         aria-pressed={active}
         onClick={() => setFilter(active ? 'all' : s)}
-        className={`rounded-xl border-2 px-2 py-2.5 text-center transition-colors ${meta.block} ${
-          active ? 'border-current' : ''
-        }`}
+        className={`rounded-xl border-2 px-2 py-2 text-center transition-colors ${meta.block} ${active ? 'border-current' : ''}`}
       >
-        <span className="block text-[24px] leading-none font-semibold tabular-nums">{toBnDigits(count(s))}</span>
-        <span className="mt-1 block text-[14px] leading-tight font-medium">{label}</span>
+        <span className="block text-[22px] leading-none font-semibold tabular-nums">{toBnDigits(count(s))}</span>
+        <span className="mt-1 block text-[13px] leading-tight font-medium">{label}</span>
       </button>
     );
   };
 
   return (
     <>
-      <PageTitle title="কোন ওয়ার্ডে সিট আছে?" subtitle="রোগী নিয়ে যাওয়ার আগে দেখে নিন।" />
+      <div className="space-y-3">
+        <MyWardStrip />
 
-      <section className="card space-y-3">
-        <p className="font-semibold">{hospital.nameBn}</p>
-        <div className="grid grid-cols-3 gap-2">
-          {tile('open', 'সিট আছে')}
-          {tile('emergency', 'ইমার্জেন্সি')}
-          {tile('full', 'সিট নেই')}
-        </div>
-        <p className="text-[14px] text-ink-500">
-          {filter === 'all'
-            ? `ঘরে চাপ দিলে শুধু সেই ওয়ার্ডগুলো দেখাবে। খবর নেই: ${toBnDigits(count('unknown'))}টি।`
-            : 'আবার চাপ দিলে সব ওয়ার্ড দেখাবে।'}
-        </p>
-      </section>
-
-      <div className="relative mt-3">
-        <Search size={20} className="pointer-events-none absolute top-1/2 left-3.5 -translate-y-1/2 text-ink-400" />
-        <input
-          id="ward-search"
-          className="input pl-11"
-          type="search"
-          placeholder="ওয়ার্ড খুঁজুন, যেমন: মেডিসিন"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
-      </div>
-
-      {error && (
-        <div className="mt-3">
-          <Notice tone="warn">তথ্য আনা যাচ্ছে না। ইন্টারনেট সংযোগ দেখুন।</Notice>
-        </div>
-      )}
-
-      {!loaded && !error ? (
-        <p className="card mt-3 text-ink-500">লোড হচ্ছে…</p>
-      ) : list.length === 0 ? (
-        <p className="card mt-3 text-ink-500">এমন কোনো ওয়ার্ড পাওয়া যায়নি।</p>
-      ) : (
-        <ul className="mt-3 space-y-2.5">
-          {list.map((w) => (
-            <WardCard
-              key={w.id}
-              ward={w}
-              hospital={hospital}
-              open={openId === w.id}
-              onToggle={() => setOpenId(openId === w.id ? '' : w.id)}
-              onRefer={() => setReferTo(w.id)}
-              doctorsHere={onDuty.filter((d) => d.wardId === w.id)}
+        <section className="space-y-2">
+          <h1 className="px-1 text-[20px] leading-tight font-semibold">কোথায় সিট আছে?</h1>
+          <div className="grid grid-cols-3 gap-2">
+            {tile('open', 'সিট আছে')}
+            {tile('emergency', 'ইমার্জেন্সি')}
+            {tile('full', 'সিট নেই')}
+          </div>
+          <div className="relative">
+            <Search size={20} className="pointer-events-none absolute top-1/2 left-3.5 -translate-y-1/2 text-ink-400" />
+            <input
+              id="ward-search"
+              className="input pl-11"
+              type="search"
+              placeholder="ওয়ার্ড খুঁজুন"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
             />
-          ))}
-        </ul>
-      )}
+          </div>
+        </section>
 
-      {!user && (
-        <button
-          type="button"
-          onClick={() => go('doctor')}
-          className="mt-6 flex w-full items-center gap-3 rounded-2xl border border-brand-200 bg-brand-50 px-4 py-3.5 text-left"
-        >
-          <span className="flex-1">
-            <span className="block font-semibold text-brand-700">আপনি কি ডাক্তার?</span>
-            <span className="block text-[14px] text-ink-500">লগইন করলে ডিউটির ডাক্তারদের নম্বর দেখবেন, রেফার করতে পারবেন</span>
-          </span>
-          <ChevronRight className="text-brand-600" />
-        </button>
-      )}
+        {error && <Notice tone="warn">তথ্য আনা যাচ্ছে না। ইন্টারনেট সংযোগ দেখুন।</Notice>}
+
+        {!loaded && !error ? (
+          <p className="card text-ink-500">লোড হচ্ছে…</p>
+        ) : list.length === 0 ? (
+          <p className="card text-ink-500">এমন কোনো ওয়ার্ড পাওয়া যায়নি।</p>
+        ) : (
+          <ul className="space-y-2">
+            {list.map((w) => (
+              <WardCard
+                key={w.id}
+                ward={w}
+                hospital={hospital}
+                open={openId === w.id}
+                onToggle={() => setOpenId(openId === w.id ? '' : w.id)}
+                onRefer={() => setReferTo(w.id)}
+                doctorsHere={onDuty.filter((d) => d.wardId === w.id)}
+              />
+            ))}
+          </ul>
+        )}
+      </div>
 
       <ReferSheet open={referTo !== null} onClose={() => setReferTo(null)} initialWardId={referTo ?? undefined} />
     </>

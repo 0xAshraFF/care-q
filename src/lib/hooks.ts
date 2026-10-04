@@ -11,8 +11,8 @@ export function useNow(intervalMs = 30_000): number {
   return now;
 }
 
-export type Route = 'ward' | 'blood' | 'icu' | 'oxygen' | 'doctor';
-const ROUTES: Route[] = ['ward', 'blood', 'icu', 'oxygen', 'doctor'];
+export type Route = 'ward' | 'help' | 'blood' | 'icu' | 'oxygen' | 'ambulance' | 'doctor';
+const ROUTES: Route[] = ['ward', 'help', 'blood', 'icu', 'oxygen', 'ambulance', 'doctor'];
 
 function readHash(): Route {
   const r = window.location.hash.replace(/^#\/?/, '') as Route;

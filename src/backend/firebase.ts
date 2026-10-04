@@ -46,7 +46,7 @@ function toProfile(uid: string, d: DocumentData): DoctorProfile {
     uid,
     name: d.name,
     phone: d.phone,
-    bmdc: d.bmdc ?? '',
+    role: d.role === 'incharge' ? 'incharge' : 'doctor',
     hospitalId: d.hospitalId,
     wardId: d.wardId ?? '',
     newWardName: d.newWardName ?? '',
@@ -243,7 +243,7 @@ export function createFirebaseBackend(config: FirebaseConfig): Backend {
       await updateDoc(doc(db, 'transfers', transferId), { status: 'cancelled', respondedAt: serverTimestamp() });
     },
 
-    async isAdmin() {
+    async isSuperAdmin() {
       // The rules only let admins read this doc, so a successful read is the answer.
       try {
         return (await getDoc(doc(db, 'config', 'admins'))).exists();

@@ -1,13 +1,14 @@
 // Demo backend: everything lives in this browser's localStorage.
 // Used when no Firebase config is set, so the app can be clicked through before the project exists.
-// The demo user is also an admin, so the approval flow can be tried end to end. Referrals are
-// simulated too: the demo user's ward gets one incoming request, and requests the demo user sends
-// are answered by a demo doctor a few seconds later.
+// Approval is simulated: the demo user's sign-up is approved a few seconds later, and if they signed
+// up as a ward in-charge, a doctor of their ward then asks to join so they can approve someone.
+// Referrals are simulated too: the demo user's ward gets one incoming request, and requests the demo
+// user sends are answered by a demo doctor a few seconds later.
 
 import { load, save } from '../lib/storage';
-import type { AuthUser, Backend, DoctorProfile, Transfer, WardDoc, WardState } from './types';
+import type { AuthUser, Backend, DoctorProfile, DoctorRole, Transfer, WardDoc, WardState } from './types';
 
-const KEY = 'careq-demo-v4';
+const KEY = 'careq-demo-v5';
 const DEMO_UID = 'demo-doctor';
 
 interface DemoState {
@@ -31,11 +32,18 @@ function seed(): DemoState {
     updatedByUid: 'demo-a',
   });
   // 010… isn't an assigned Bangladeshi prefix, so tapping a demo number can't ring a real person.
-  const doctor = (uid: string, name: string, phone: string, wardId: string, approved = true): DoctorProfile => ({
+  const doctor = (
+    uid: string,
+    name: string,
+    phone: string,
+    wardId: string,
+    approved = true,
+    role: DoctorRole = 'doctor',
+  ): DoctorProfile => ({
     uid,
     name,
     phone,
-    bmdc: `A-${phone.slice(-5)}`,
+    role,
     hospitalId: 'dmch',
     wardId,
     newWardName: '',
@@ -45,7 +53,7 @@ function seed(): DemoState {
   return {
     signedIn: false,
     doctors: {
-      'demo-a': doctor('demo-a', 'ডা. নুসরাত জাহান (ডেমো)', '01000000001', 'dmch-cardiology'),
+      'demo-a': doctor('demo-a', 'ডা. নুসরাত জাহান (ডেমো)', '01000000001', 'dmch-cardiology', true, 'incharge'),
       'demo-b': doctor('demo-b', 'ডা. তানভীর হাসান (ডেমো)', '01000000002', 'dmch-neurology'),
       'demo-c': doctor('demo-c', 'ডা. সাবরিনা ইসলাম (ডেমো)', '01000000003', 'dmch-medicine'),
       'demo-e': doctor('demo-e', 'ডা. ফারহানা আক্তার (ডেমো)', '01000000005', 'dmch-respiratory'),
@@ -102,6 +110,46 @@ export function createDemoBackend(): Backend {
   const newId = () => `t-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
   const seedTimers = new Set<string>();
 
+  /** Stand-in for the ward in-charge (or app admin) approving the demo user a few seconds later. */
+  const simulateApproval = (uid: string) => {
+    setTimeout(() => {
+      const me = state.doctors[uid];
+      if (!me || me.approved) return;
+      let wardId = me.wardId;
+      let wards = state.wards;
+      if (!wardId && me.newWardName) {
+        wardId = `custom-${Date.now().toString(36)}`;
+        wards = { ...wards, [wardId]: { id: wardId, hospitalId: me.hospitalId, nameBn: me.newWardName, custom: true } };
+      }
+      const approved = { ...me, wardId, newWardName: '', approved: true };
+      commit({ ...state, wards, doctors: { ...state.doctors, [uid]: approved } });
+      // An in-charge gets a doctor from their ward asking to join, so approving can be tried.
+      if (approved.role === 'incharge') {
+        setTimeout(() => {
+          const id = `demo-join-${wardId}`;
+          if (state.doctors[id]) return;
+          commit({
+            ...state,
+            doctors: {
+              ...state.doctors,
+              [id]: {
+                uid: id,
+                name: 'ডা. রাকিব হাসান (ডেমো)',
+                phone: '01000000008',
+                role: 'doctor',
+                hospitalId: approved.hospitalId,
+                wardId,
+                newWardName: '',
+                approved: false,
+                dutyUntil: null,
+              },
+            },
+          });
+        }, 3000);
+      }
+    }, 5000);
+  };
+
   const setWardStatus = (uid: string, hospitalId: string, wardId: string, status: WardState, freeBeds: number | null) => {
     const prev = state.wards[wardId] ?? { id: wardId, hospitalId };
     commit({
@@ -131,6 +179,7 @@ export function createDemoBackend(): Backend {
 
     async saveProfile(uid, input, approved, dutyUntil) {
       commit({ ...state, doctors: { ...state.doctors, [uid]: { uid, ...input, approved, dutyUntil } } });
+      if (!approved && uid === DEMO_UID) simulateApproval(uid);
     },
 
     async setDuty(uid, dutyUntil) {
@@ -244,8 +293,9 @@ export function createDemoBackend(): Backend {
       if (cur) putTransfer({ ...cur, status: 'cancelled', respondedAt: Date.now() });
     },
 
-    async isAdmin() {
-      return state.signedIn;
+    async isSuperAdmin() {
+      // The demo has no app admin; approvals are simulated (see simulateApproval).
+      return false;
     },
 
     watchAllDoctors(cb) {

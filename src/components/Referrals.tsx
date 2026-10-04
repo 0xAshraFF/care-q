@@ -7,7 +7,7 @@ import { notify } from '../lib/notify';
 import { STALE_AFTER_MS, useApp, useIncomingTransfers, useOnDutyDoctors, useSentTransfers, useWards, type WardView } from '../state/app';
 import { Sheet } from './Sheet';
 import { CallCircle, Field, Notice } from './ui';
-import { STATUS_META, StatusBlock, bedsText } from './WardStatus';
+import { STATUS_META, StatusPill, bedsText } from './WardStatus';
 
 function useWardNames(hospitalId: string) {
   const { wards } = useWards(hospitalId);
@@ -43,7 +43,29 @@ export const AGE_GROUPS = [
 ];
 export const SEXES = ['পুরুষ', 'মহিলা', 'অন্যান্য'];
 
-/** Pick a ward, see its status and who's on duty there, send a request. Calling stays one tap away. */
+/** Common reasons, so a busy doctor taps instead of typing. */
+export const REFER_REASONS = [
+  'বুকে ব্যথা / হার্ট',
+  'শ্বাসকষ্ট',
+  'স্ট্রোক / অজ্ঞান',
+  'খিঁচুনি',
+  'দুর্ঘটনা / আঘাত',
+  'পোড়া',
+  'রক্তক্ষরণ',
+  'পেটের সমস্যা',
+  'কিডনি',
+  'প্রসূতি',
+  'অপারেশন দরকার',
+  'আইসিইউ সাপোর্ট দরকার',
+];
+export const URGENCY = ['খুব জরুরি', 'জরুরি', 'সাধারণ'] as const;
+
+/** "খুব জরুরি · শ্বাসকষ্ট, স্ট্রোক / অজ্ঞান · ইসিজিতে পরিবর্তন" */
+export function referralNote(urgency: string, reasons: string[], extra: string): string {
+  return [urgency, reasons.join(', '), extra.trim()].filter(Boolean).join(' · ').slice(0, 300);
+}
+
+/** Pick a ward (already picked when opened from a ward card), tap a few options, send. */
 export function ReferSheet({
   open,
   onClose,
@@ -57,9 +79,12 @@ export function ReferSheet({
   const { wards } = useWards(profile?.hospitalId ?? DEFAULT_HOSPITAL.id);
   const onDuty = useOnDutyDoctors();
   const [toWardId, setToWardId] = useState('');
-  const [note, setNote] = useState('');
+  const [reasons, setReasons] = useState<string[]>([]);
+  const [urgency, setUrgency] = useState<string>('জরুরি');
   const [age, setAge] = useState('');
   const [sex, setSex] = useState('');
+  const [extra, setExtra] = useState('');
+  const [showExtra, setShowExtra] = useState(false);
 
   useEffect(() => {
     if (open) setToWardId(initialWardId && initialWardId !== profile?.wardId ? initialWardId : '');
@@ -71,19 +96,36 @@ export function ReferSheet({
   const targetDoctors = target ? onDuty.filter((d) => d.wardId === target.id) : [];
   const full = target?.status === 'full';
 
-  const missing = !target ? 'কোন ওয়ার্ডে পাঠাবেন, বেছে নিন।' : note.trim().length < 2 ? 'রোগীর সমস্যা লিখুন।' : null;
+  const missing = !target
+    ? 'কোন ওয়ার্ডে পাঠাবেন, বেছে নিন।'
+    : reasons.length === 0 && extra.trim().length < 2
+      ? 'কেন পাঠাচ্ছেন, অন্তত একটা বেছে নিন।'
+      : null;
+
+  const toggleReason = (r: string) =>
+    setReasons((cur) => (cur.includes(r) ? cur.filter((x) => x !== r) : [...cur, r]));
+
+  const reset = () => {
+    setReasons([]);
+    setUrgency('জরুরি');
+    setAge('');
+    setSex('');
+    setExtra('');
+    setShowExtra(false);
+  };
 
   const send = () => {
     if (!backend || !target || missing) return;
-    const patientInfo = [age, sex].filter(Boolean).join(', ');
     // Don't wait for the server: on a bad connection Firestore queues the write and sends it later.
     backend
-      .createTransfer(profile, { toWardId: target.id, patientNote: note.trim(), patientInfo })
+      .createTransfer(profile, {
+        toWardId: target.id,
+        patientNote: referralNote(urgency, reasons, extra),
+        patientInfo: [age, sex].filter(Boolean).join(', '),
+      })
       .catch(() => toast('অনুরোধ যায়নি। আবার চেষ্টা করুন।'));
-    toast('অনুরোধ পাঠানো হয়েছে। উত্তর এলে ডাক্তার পাতায় দেখাবে।');
-    setNote('');
-    setAge('');
-    setSex('');
+    toast('অনুরোধ গেছে। উত্তর এলে "আমার" পাতায় দেখাবে।');
+    reset();
     onClose();
   };
 
@@ -91,14 +133,16 @@ export function ReferSheet({
     `${STATUS_META[w.status].dot} ${w.nameBn}${w.freeBeds ? ` · ${bedsText(w.freeBeds)}` : w.status === 'unknown' ? ' · খবর নেই' : ''}`;
 
   return (
-    <Sheet open={open} onClose={onClose} title="অন্য ওয়ার্ডে রোগী রেফার">
-      <p className="rounded-xl bg-page px-3.5 py-2.5 text-[15px] text-ink-700">
-        আপনার ওয়ার্ড: <span className="font-semibold text-ink-900">{myWard?.nameBn ?? '…'}</span>
-      </p>
-
-      <Field label="কোন ওয়ার্ডে পাঠাবেন" htmlFor="refer-ward">
-        <select id="refer-ward" className="input" value={toWardId} onChange={(e) => setToWardId(e.target.value)}>
-          <option value="">ওয়ার্ড বেছে নিন</option>
+    <Sheet open={open} onClose={onClose} title={`রেফার${myWard ? `: ${myWard.nameBn} থেকে` : ''}`}>
+      <div className="space-y-2">
+        <select
+          id="refer-ward"
+          aria-label="কোন ওয়ার্ডে পাঠাবেন"
+          className="input"
+          value={toWardId}
+          onChange={(e) => setToWardId(e.target.value)}
+        >
+          <option value="">কোন ওয়ার্ডে পাঠাবেন?</option>
           {wards
             .filter((w) => w.id !== profile.wardId)
             .map((w) => (
@@ -107,83 +151,95 @@ export function ReferSheet({
               </option>
             ))}
         </select>
-      </Field>
-
-      {target && (
-        <div className="space-y-3">
-          <StatusBlock status={target.status} />
-          <p className="text-[14px] text-ink-500">
+        {target && (
+          <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[14px] text-ink-500">
+            <StatusPill status={target.status} />
             {target.updatedAt !== undefined ? `আপডেট ${timeAgo(target.updatedAt, now)}` : 'এখনো কেউ জানায়নি'}
-            {target.freeBeds ? ` · ${bedsText(target.freeBeds)}` : ''}
+            {target.freeBeds ? <span className="font-medium text-ok-700">{bedsText(target.freeBeds)}</span> : null}
           </p>
-          {target.updatedAt !== undefined && now - target.updatedAt > STALE_AFTER_MS && (
-            <Notice tone="warn">খবরটা ৬ ঘণ্টার বেশি পুরনো। পাঠানোর আগে ফোন করে নিন।</Notice>
-          )}
-          {full ? (
-            <Notice tone="warn">
-              সতর্কতা: এই ওয়ার্ডে এখন সিট নেই। খুব জরুরি হলে অনুরোধ পাঠাতে পারেন, ওই ওয়ার্ডের ডাক্তার সিদ্ধান্ত নেবেন।
-            </Notice>
+        )}
+        {target && target.updatedAt !== undefined && now - target.updatedAt > STALE_AFTER_MS && (
+          <Notice tone="warn">খবরটা ৬ ঘণ্টার বেশি পুরনো। পাঠানোর আগে ফোন করে নিন।</Notice>
+        )}
+        {target &&
+          (full ? (
+            <Notice tone="warn">এই ওয়ার্ডে এখন সিট নেই। খুব জরুরি হলে পাঠাতে পারেন, ওই ওয়ার্ডের ডাক্তার সিদ্ধান্ত নেবেন।</Notice>
           ) : targetDoctors.length > 0 ? (
-            <div className="space-y-2">
-              <p className="label mb-0">এখন ডিউটিতে · সরাসরি ফোন</p>
-              {targetDoctors.map((d) => (
-                <DoctorCallRow key={d.uid} name={d.name} phone={d.phone} />
-              ))}
-            </div>
+            targetDoctors.slice(0, 2).map((d) => <DoctorCallRow key={d.uid} name={d.name} phone={d.phone} note="ডিউটিতে" />)
           ) : (
-            <Notice>
-              এই ওয়ার্ডের কেউ এখন অ্যাপে ডিউটিতে নেই। অনুরোধ পাঠানো যাবে, তবে কেউ অ্যাপ খুললে তবেই দেখবেন।
-            </Notice>
-          )}
-        </div>
-      )}
+            <Notice>এই ওয়ার্ডের কেউ এখন অ্যাপে ডিউটিতে নেই। কেউ অ্যাপ খুললে অনুরোধ দেখবেন।</Notice>
+          ))}
+      </div>
 
       {target && (
         <>
-          <Field label="রোগীর সমস্যা" htmlFor="refer-note">
-            <textarea
-              id="refer-note"
-              className="input min-h-24 py-3"
-              maxLength={300}
-              placeholder="যেমন: তীব্র শ্বাসকষ্ট, সিসিইউ বেড দরকার"
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-            />
-          </Field>
+          <fieldset>
+            <legend className="label">কেন পাঠাচ্ছেন</legend>
+            <div className="flex flex-wrap gap-2">
+              {REFER_REASONS.map((r) => (
+                <button key={r} type="button" className="chip" aria-pressed={reasons.includes(r)} onClick={() => toggleReason(r)}>
+                  {r}
+                </button>
+              ))}
+            </div>
+          </fieldset>
+          <fieldset>
+            <legend className="label">কতটা জরুরি</legend>
+            <div className="grid grid-cols-3 gap-2">
+              {URGENCY.map((u) => (
+                <button key={u} type="button" className="chip px-2" aria-pressed={urgency === u} onClick={() => setUrgency(u)}>
+                  {u}
+                </button>
+              ))}
+            </div>
+          </fieldset>
           <div className="grid grid-cols-[3fr_2fr] gap-2">
-            <Field label="বয়স (না দিলেও চলবে)" htmlFor="refer-age">
-              <select id="refer-age" className="input" value={age} onChange={(e) => setAge(e.target.value)}>
-                <option value="">বয়স</option>
-                {AGE_GROUPS.map((a) => (
-                  <option key={a} value={a}>
-                    {a}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <Field label="লিঙ্গ" htmlFor="refer-sex">
-              <select id="refer-sex" className="input" value={sex} onChange={(e) => setSex(e.target.value)}>
-                <option value="">লিঙ্গ</option>
-                {SEXES.map((x) => (
-                  <option key={x} value={x}>
-                    {x}
-                  </option>
-                ))}
-              </select>
-            </Field>
+            <select id="refer-age" aria-label="বয়স" className="input" value={age} onChange={(e) => setAge(e.target.value)}>
+              <option value="">বয়স</option>
+              {AGE_GROUPS.map((a) => (
+                <option key={a} value={a}>
+                  {a}
+                </option>
+              ))}
+            </select>
+            <select id="refer-sex" aria-label="লিঙ্গ" className="input" value={sex} onChange={(e) => setSex(e.target.value)}>
+              <option value="">লিঙ্গ</option>
+              {SEXES.map((x) => (
+                <option key={x} value={x}>
+                  {x}
+                </option>
+              ))}
+            </select>
           </div>
+          {showExtra ? (
+            <Field label="আরও কিছু (না দিলেও চলবে)" htmlFor="refer-extra">
+              <input
+                id="refer-extra"
+                className="input"
+                maxLength={120}
+                placeholder="যেমন: ইসিজিতে পরিবর্তন"
+                value={extra}
+                onChange={(e) => setExtra(e.target.value)}
+              />
+            </Field>
+          ) : (
+            <button type="button" className="text-[15px] font-medium text-brand-700 underline" onClick={() => setShowExtra(true)}>
+              + আরও কিছু লিখতে চাইলে
+            </button>
+          )}
         </>
       )}
 
-      {missing && target && <p className="text-[15px] font-medium text-warn-700">{missing}</p>}
-
-      <div className="grid grid-cols-2 gap-2 pt-1">
-        <button type="button" className="btn btn-soft" onClick={onClose}>
-          বাতিল
-        </button>
-        <button type="button" className="btn btn-primary" disabled={missing !== null} onClick={send}>
-          <Send size={19} /> অনুরোধ পাঠান
-        </button>
+      <div className="sticky bottom-0 -mx-4 space-y-2 border-t border-line bg-white px-4 pt-3 pb-1">
+        {missing && target && <p className="text-[15px] font-medium text-warn-700">{missing}</p>}
+        <div className="grid grid-cols-[2fr_3fr] gap-2">
+          <button type="button" className="btn btn-soft" onClick={onClose}>
+            বাতিল
+          </button>
+          <button type="button" className="btn btn-primary" disabled={missing !== null} onClick={send}>
+            <Send size={19} /> পাঠান
+          </button>
+        </div>
       </div>
     </Sheet>
   );
@@ -215,6 +271,9 @@ function IncomingCard({ t, onDone }: { t: Transfer; onDone?: () => void }) {
   const names = useWardNames(t.hospitalId);
   const respond = useRespond();
   const [busy, setBusy] = useState(false);
+  // The urgency chip is the first part of the note ("খুব জরুরি · শ্বাসকষ্ট"); show it as a badge.
+  const urgency = URGENCY.find((u) => t.patientNote === u || t.patientNote.startsWith(`${u} · `));
+  const note = urgency ? t.patientNote.slice(urgency.length).replace(/^ · /, '') : t.patientNote;
   const act = async (accept: boolean) => {
     setBusy(true);
     await respond(t, accept);
@@ -228,7 +287,16 @@ function IncomingCard({ t, onDone }: { t: Transfer; onDone?: () => void }) {
         {timeAgo(t.createdAt, now)}
       </p>
       <div className="rounded-xl bg-page px-3.5 py-3">
-        <p className="text-[17px] leading-snug">{t.patientNote}</p>
+        {urgency && (
+          <span
+            className={`mb-1.5 inline-block rounded-full px-2.5 py-0.5 text-[13px] font-semibold ${
+              urgency === 'খুব জরুরি' ? 'bg-bad-600 text-white' : urgency === 'জরুরি' ? 'bg-warn-50 text-warn-700' : 'bg-white text-ink-500'
+            }`}
+          >
+            {urgency}
+          </span>
+        )}
+        <p className="text-[17px] leading-snug">{note}</p>
         {t.patientInfo && <p className="mt-1 text-[15px] text-ink-500">{t.patientInfo}</p>}
       </div>
       <DoctorCallRow name={t.fromDoctorName} phone={t.fromDoctorPhone} note="যিনি পাঠিয়েছেন" />

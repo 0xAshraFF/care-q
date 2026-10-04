@@ -1,9 +1,14 @@
 import { Phone, ShieldCheck } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import type { DoctorProfile } from '../backend/types';
-import { DEFAULT_HOSPITAL, findHospital } from '../data/hospitals';
+import { DEFAULT_HOSPITAL } from '../data/hospitals';
 import { formatPhone, telHref, toBnDigits, wardNameKey } from '../lib/bn';
 import { useApp, useWards, type WardView } from '../state/app';
+
+export const ROLE_LABEL: Record<DoctorProfile['role'], string> = {
+  doctor: 'ডাক্তার',
+  incharge: 'ওয়ার্ড ইনচার্জ',
+};
 
 function wardLabel(d: DoctorProfile, wards: WardView[]): string {
   if (d.wardId) return wards.find((w) => w.id === d.wardId)?.nameBn ?? 'অজানা ওয়ার্ড';
@@ -21,7 +26,7 @@ function PendingDoctor({ d, wards }: { d: DoctorProfile; wards: WardView[] }) {
     try {
       let wardId = d.wardId;
       if (!wardId) {
-        // Create the ward they asked for, unless someone already added one with the same name.
+        // Only the app admin sees requests for new wards. Reuse a ward with the same name if one exists.
         const same = wards.find((w) => wardNameKey(w.nameBn) === wardNameKey(d.newWardName));
         wardId = same ? same.id : await backend.addWard(user.uid, d.hospitalId, d.newWardName);
       }
@@ -49,14 +54,11 @@ function PendingDoctor({ d, wards }: { d: DoctorProfile; wards: WardView[] }) {
       <div>
         <p className="text-[18px] font-semibold">{d.name}</p>
         <p className="text-[15px] text-ink-500">
-          বিএমডিসি: <span className="font-medium text-ink-900">{d.bmdc}</span>
-        </p>
-        <p className="text-[15px] text-ink-500">
-          {findHospital(d.hospitalId)?.shortBn} · {wardLabel(d, wards)}
+          {ROLE_LABEL[d.role]} · {wardLabel(d, wards)}
         </p>
       </div>
       <a href={telHref(d.phone)} className="btn btn-soft w-full">
-        <Phone size={19} /> ফোন করে যাচাই <span className="font-normal text-ink-500">{formatPhone(d.phone)}</span>
+        <Phone size={19} /> ফোন করুন <span className="font-normal text-ink-500 tabular-nums">{formatPhone(d.phone)}</span>
       </a>
       {confirming ? (
         <div className="space-y-2 rounded-xl bg-bad-50 p-3">
@@ -107,7 +109,7 @@ function ApprovedDoctor({ d, wards }: { d: DoctorProfile; wards: WardView[] }) {
         <div className="min-w-0 flex-1">
           <p className="font-semibold">{d.name}</p>
           <p className="text-[14px] text-ink-500">
-            {wardLabel(d, wards)} · বিএমডিসি {d.bmdc} · {formatPhone(d.phone)}
+            {ROLE_LABEL[d.role]} · {wardLabel(d, wards)} · {formatPhone(d.phone)}
           </p>
         </div>
         {!confirming && (
@@ -123,7 +125,7 @@ function ApprovedDoctor({ d, wards }: { d: DoctorProfile; wards: WardView[] }) {
       {confirming && (
         <div className="space-y-2 rounded-xl bg-bad-50 p-3">
           <p className="text-[15px] text-bad-700">
-            অনুমোদন তুলে নিলে উনি আর ওয়ার্ডের অবস্থা বদলাতে বা নম্বর দেখতে পারবেন না।
+            অনুমোদন তুলে নিলে উনি আর ওয়ার্ডের অবস্থা বদলাতে, রেফার করতে বা নম্বর দেখতে পারবেন না।
           </p>
           <div className="grid grid-cols-2 gap-2">
             <button type="button" onClick={() => setConfirming(false)} className="btn btn-soft bg-white">
@@ -139,9 +141,12 @@ function ApprovedDoctor({ d, wards }: { d: DoctorProfile; wards: WardView[] }) {
   );
 }
 
-/** Admins approve doctors here after a quick phone call to check the BMDC number and ward. */
+/**
+ * Approvals. A ward in-charge sees the doctors of their own ward; the app admin sees everyone
+ * (in-charges, and doctors whose ward has no in-charge yet or doesn't exist yet).
+ */
 export function AdminPanel() {
-  const { backend } = useApp();
+  const { backend, profile, isIncharge, isSuperAdmin } = useApp();
   const [docs, setDocs] = useState<DoctorProfile[] | null>(null);
   // Pilot: every doctor is at the default hospital. With more hospitals, look wards up per doctor.
   const { wards } = useWards(DEFAULT_HOSPITAL.id);
@@ -151,17 +156,28 @@ export function AdminPanel() {
     return backend.watchAllDoctors(setDocs, () => setDocs([]));
   }, [backend]);
 
-  if (docs === null) return null;
+  if (docs === null || !(isSuperAdmin || isIncharge)) return null;
+  const myWardId = profile?.wardId;
+  const inScope = (d: DoctorProfile) =>
+    d.uid !== profile?.uid && (isSuperAdmin || (d.role === 'doctor' && d.wardId === myWardId));
   const byName = (a: DoctorProfile, b: DoctorProfile) => a.name.localeCompare(b.name, 'bn');
-  const pending = docs.filter((d) => !d.approved).sort(byName);
-  const approved = docs.filter((d) => d.approved).sort(byName);
+  const pending = docs.filter((d) => !d.approved && inScope(d)).sort(byName);
+  const approved = docs.filter((d) => d.approved && inScope(d)).sort(byName);
+  const wardName = wards.find((w) => w.id === myWardId)?.nameBn;
 
   return (
     <section className="space-y-3">
-      <h2 className="flex items-center gap-2 px-1 text-[19px] font-semibold">
-        <ShieldCheck size={22} className="text-brand-600" />
-        অনুমোদনের অপেক্ষায় ({toBnDigits(pending.length)})
-      </h2>
+      <div className="px-1">
+        <h2 className="flex items-center gap-2 text-[19px] font-semibold">
+          <ShieldCheck size={22} className="text-brand-600" />
+          অনুমোদনের অপেক্ষায় ({toBnDigits(pending.length)})
+        </h2>
+        <p className="text-[14px] text-ink-500">
+          {isSuperAdmin
+            ? 'অ্যাপ অ্যাডমিন: ওয়ার্ড ইনচার্জ আর নতুন ওয়ার্ডের আবেদন আপনার কাছে আসবে।'
+            : `${wardName ?? 'আপনার ওয়ার্ড'}-এর ডাক্তাররা। চেনা মানুষ কি না, ফোন করে নিশ্চিত হয়ে অনুমোদন দিন।`}
+        </p>
+      </div>
       {pending.length === 0 ? (
         <p className="card text-ink-500">এখন কেউ অপেক্ষায় নেই।</p>
       ) : (
@@ -174,7 +190,7 @@ export function AdminPanel() {
       {approved.length > 0 && (
         <details className="card overflow-hidden p-0">
           <summary className="cursor-pointer px-4 py-3.5 font-semibold text-ink-700">
-            অনুমোদিত ডাক্তার ({toBnDigits(approved.length)})
+            অনুমোদিত ({toBnDigits(approved.length)})
           </summary>
           <ul className="divide-y divide-line border-t border-line">
             {approved.map((d) => (

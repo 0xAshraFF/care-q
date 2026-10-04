@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { bloodMessage, icuMessage, oxygenMessage } from '../src/lib/messages';
+import { BLOOD_GROUPS, CAN_RECEIVE_FROM, bloodMessage, icuMessage, oxygenMessage } from '../src/lib/messages';
 import { mergeWards } from '../src/state/app';
 
 describe('blood post', () => {
@@ -53,5 +53,17 @@ describe('mergeWards', () => {
     expect(by('dmch-surgery')?.status).toBe('unknown');
     expect(by('x1')).toMatchObject({ status: 'open', freeBeds: null });
     expect(by('stray')).toBeUndefined();
+  });
+});
+
+describe('blood compatibility', () => {
+  it('O- gives to everyone, AB+ takes from everyone, Rh- never takes Rh+', () => {
+    for (const g of BLOOD_GROUPS) {
+      expect(CAN_RECEIVE_FROM[g]).toContain('O-');
+      expect(CAN_RECEIVE_FROM[g]).toContain(g);
+      if (g.endsWith('-')) expect(CAN_RECEIVE_FROM[g].every((d) => d.endsWith('-'))).toBe(true);
+    }
+    expect(CAN_RECEIVE_FROM['AB+']).toHaveLength(8);
+    expect(CAN_RECEIVE_FROM['O-']).toEqual(['O-']);
   });
 });

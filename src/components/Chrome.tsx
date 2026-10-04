@@ -1,4 +1,4 @@
-import { BedDouble, Download, Droplet, HeartPulse, Stethoscope, WifiOff, Wind } from 'lucide-react';
+import { Ambulance, BedDouble, Download, Droplet, HeartPulse, LifeBuoy, LogIn, UserRound, WifiOff, Wind } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { firebaseConfigured } from '../backend';
 import { resetDemo } from '../backend/demo';
@@ -53,6 +53,20 @@ export function Logo({ size = 36 }: { size?: number }) {
   );
 }
 
+function DoctorLoginButton() {
+  const { user, mode, setMode } = useApp();
+  if (user || mode !== 'patient') return null;
+  return (
+    <button
+      type="button"
+      onClick={() => setMode('doctor')}
+      className="inline-flex min-h-10 shrink-0 items-center gap-1.5 rounded-full border border-brand-200 bg-white px-3 text-[14px] font-semibold text-brand-700 active:bg-brand-50"
+    >
+      <LogIn size={16} /> ডাক্তার লগইন
+    </button>
+  );
+}
+
 export function Header() {
   return (
     <header
@@ -66,28 +80,32 @@ export function Header() {
           <p className="truncate text-[13px] leading-tight text-ink-500">{DEFAULT_HOSPITAL.nameBn}</p>
         </div>
         <InstallButton />
+        <DoctorLoginButton />
       </div>
     </header>
   );
 }
 
-const TABS: { id: Route; label: string; Icon: typeof BedDouble }[] = [
-  { id: 'ward', label: 'ওয়ার্ড', Icon: BedDouble },
-  { id: 'blood', label: 'রক্ত', Icon: Droplet },
-  { id: 'icu', label: 'আইসিইউ', Icon: HeartPulse },
-  { id: 'oxygen', label: 'অক্সিজেন', Icon: Wind },
-  { id: 'doctor', label: 'ডাক্তার', Icon: Stethoscope },
-];
+const TAB_META: Record<Route, { label: string; Icon: typeof BedDouble }> = {
+  ward: { label: 'ওয়ার্ড', Icon: BedDouble },
+  help: { label: 'সেবা', Icon: LifeBuoy },
+  blood: { label: 'রক্ত', Icon: Droplet },
+  icu: { label: 'আইসিইউ', Icon: HeartPulse },
+  oxygen: { label: 'অক্সিজেন', Icon: Wind },
+  ambulance: { label: 'অ্যাম্বুলেন্স', Icon: Ambulance },
+  doctor: { label: 'আমার', Icon: UserRound },
+};
 
-export function BottomNav({ route, go }: { route: Route; go: (r: Route) => void }) {
+export function BottomNav({ tabs, route, go }: { tabs: Route[]; route: Route; go: (r: Route) => void }) {
   const { isDoctor } = useApp();
   return (
     <nav
       className="fixed inset-x-0 bottom-0 z-20 border-t border-line bg-white"
       style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
     >
-      <ul className="mx-auto grid max-w-xl grid-cols-5">
-        {TABS.map(({ id, label, Icon }) => {
+      <ul className="mx-auto grid max-w-xl" style={{ gridTemplateColumns: `repeat(${tabs.length}, minmax(0, 1fr))` }}>
+        {tabs.map((id) => {
+          const { label, Icon } = TAB_META[id];
           const active = id === route;
           return (
             <li key={id}>

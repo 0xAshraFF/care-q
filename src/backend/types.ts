@@ -5,27 +5,32 @@ export interface AuthUser {
   displayName: string | null;
 }
 
+/** A ward in-charge approves the doctors of their own ward. */
+export type DoctorRole = 'doctor' | 'incharge';
+
 export interface DoctorProfile {
   uid: string;
   name: string;
   /** 11-digit BD mobile, English digits. Only approved doctors and admins can read it. */
   phone: string;
-  /** BMDC registration number, as typed (English digits). Checked by an admin before approval. */
-  bmdc: string;
+  role: DoctorRole;
   hospitalId: string;
   /** '' while the doctor is waiting for a ward they asked to be added (see newWardName). */
   wardId: string;
   /** Ward the doctor asked for that isn't in the list yet; created by the admin on approval. */
   newWardName: string;
-  /** Set only by an admin. Unapproved doctors see what patients see. */
+  /**
+   * Set by the ward's in-charge (for doctors) or the app admin (for in-charges, and for anyone
+   * asking for a new ward). Unapproved doctors see what patients see.
+   */
   approved: boolean;
   /** Epoch ms when the doctor's shift ends; null when not on duty. */
   dutyUntil: number | null;
 }
 
-export type ProfileInput = Pick<DoctorProfile, 'name' | 'phone' | 'bmdc' | 'hospitalId' | 'wardId' | 'newWardName'>;
+export type ProfileInput = Pick<DoctorProfile, 'name' | 'phone' | 'role' | 'hospitalId' | 'wardId' | 'newWardName'>;
 
-/** Changes an admin may make to someone else's profile. */
+/** Changes an approver may make to someone else's profile. In-charges may only touch `approved` and `dutyUntil`. */
 export interface AdminPatch {
   approved?: boolean;
   wardId?: string;
@@ -81,7 +86,10 @@ export interface Backend {
   signOut(): Promise<void>;
 
   watchProfile(uid: string, cb: (p: DoctorProfile | null) => void, onError: (e: Error) => void): Unsub;
-  /** Writes the doctor's own profile. `approved` must be false unless the doctor already was approved. */
+  /**
+   * Writes the doctor's own profile. `approved` must be false unless the doctor already was approved
+   * and kept the same name, role and ward.
+   */
   saveProfile(uid: string, input: ProfileInput, approved: boolean, dutyUntil: number | null): Promise<void>;
   setDuty(uid: string, dutyUntil: number | null): Promise<void>;
 
@@ -111,8 +119,8 @@ export interface Backend {
   ): Promise<void>;
   cancelTransfer(uid: string, transferId: string): Promise<void>;
 
-  /** True when the signed-in user's Gmail is listed in config/admins. */
-  isAdmin(): Promise<boolean>;
+  /** True when the signed-in user's Gmail is listed in config/admins (the app owner). */
+  isSuperAdmin(): Promise<boolean>;
   watchAllDoctors(cb: (docs: DoctorProfile[]) => void, onError: (e: Error) => void): Unsub;
   adminUpdateDoctor(uid: string, patch: AdminPatch): Promise<void>;
   deleteDoctor(uid: string): Promise<void>;

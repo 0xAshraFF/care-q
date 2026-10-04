@@ -29,7 +29,7 @@ const ADMIN_EMAIL = 'boss@example.com';
 const profile = (wardId: string, extra: Record<string, unknown> = {}) => ({
   name: 'ডা. রহিম',
   phone: '01712345678',
-  bmdc: 'A-12345',
+  role: 'doctor',
   hospitalId: 'dmch',
   wardId,
   newWardName: '',
@@ -191,24 +191,27 @@ describe('doctors: registering and editing', () => {
     );
   });
 
-  it('rejects bad phones, missing BMDC, extra fields, and other people’s profiles', async () => {
+  it('signs up as a doctor or an in-charge; rejects bad phones, unknown roles, extra fields, others’ profiles', async () => {
     const ref = doc(db('newdoc'), 'doctors/newdoc');
+    await assertSucceeds(setDoc(doc(db('newinch'), 'doctors/newinch'), profile('dmch-icu', { role: 'incharge' })));
     await assertFails(setDoc(ref, profile('dmch-icu', { phone: '12345' })));
-    await assertFails(setDoc(ref, profile('dmch-icu', { bmdc: '' })));
     await assertFails(setDoc(ref, profile('dmch-icu', { role: 'admin' })));
+    await assertFails(setDoc(ref, profile('dmch-icu', { bmdc: 'A-12345' })));
     await assertFails(setDoc(doc(db('newdoc'), 'doctors/alice'), profile('dmch-icu')));
   });
 
-  it('an approved doctor keeps approval when changing ward or phone', async () => {
+  it('an approved doctor keeps approval when changing phone', async () => {
     await assertSucceeds(
-      setDoc(doc(db('alice'), 'doctors/alice'), profile('dmch-ccu', { phone: '01812345678', approved: true })),
+      setDoc(doc(db('alice'), 'doctors/alice'), profile('dmch-medicine', { phone: '01812345678', approved: true })),
     );
   });
 
-  it('changing name or BMDC drops approval', async () => {
+  it('changing name, role or ward drops approval', async () => {
     const ref = doc(db('alice'), 'doctors/alice');
     await assertFails(setDoc(ref, profile('dmch-medicine', { name: 'অন্য কেউ', approved: true })));
-    await assertSucceeds(setDoc(ref, profile('dmch-medicine', { name: 'অন্য কেউ', approved: false })));
+    await assertFails(setDoc(ref, profile('dmch-medicine', { role: 'incharge', approved: true })));
+    await assertFails(setDoc(ref, profile('dmch-ccu', { approved: true })));
+    await assertSucceeds(setDoc(ref, profile('dmch-ccu', { approved: false })));
   });
 
   it('duty can be at most ~25 hours ahead', async () => {
@@ -232,10 +235,10 @@ describe('doctors: admin', () => {
     await assertSucceeds(updateDoc(doc(adminDb(), 'doctors/alice'), { approved: false, dutyUntil: null }));
   });
 
-  it('admin cannot change name, phone or BMDC, or set someone on duty', async () => {
+  it('admin cannot change name, phone or role, or set someone on duty', async () => {
     const ref = doc(adminDb(), 'doctors/pete');
     await assertFails(updateDoc(ref, { phone: '01999999999' }));
-    await assertFails(updateDoc(ref, { bmdc: 'X-1' }));
+    await assertFails(updateDoc(ref, { role: 'incharge' }));
     await assertFails(updateDoc(ref, { dutyUntil: Timestamp.fromMillis(Date.now() + 3600_000) }));
   });
 
@@ -246,6 +249,43 @@ describe('doctors: admin', () => {
 
   it('a non-admin cannot approve', async () => {
     await assertFails(updateDoc(doc(db('alice'), 'doctors/pete'), { approved: true }));
+  });
+});
+
+describe('doctors: ward in-charge', () => {
+  // ingrid: approved in-charge of surgery. sam: approved surgery doctor. pete: pending surgery doctor.
+  // irene: pending in-charge of surgery. quinn: pending ICU doctor.
+  beforeEach(async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      const f = ctx.firestore();
+      await setDoc(doc(f, 'doctors/ingrid'), stored('dmch-surgery', { role: 'incharge', approved: true }));
+      await setDoc(doc(f, 'doctors/sam'), stored('dmch-surgery', { approved: true }));
+      await setDoc(doc(f, 'doctors/irene'), stored('dmch-surgery', { role: 'incharge' }));
+      await setDoc(doc(f, 'doctors/quinn'), stored('dmch-icu'));
+    });
+  });
+
+  it('approves and rejects doctors of their own ward', async () => {
+    await assertSucceeds(updateDoc(doc(db('ingrid'), 'doctors/pete'), { approved: true }));
+    await assertSucceeds(updateDoc(doc(db('ingrid'), 'doctors/sam'), { approved: false, dutyUntil: null }));
+    await assertSucceeds(deleteDoc(doc(db('ingrid'), 'doctors/pete')));
+  });
+
+  it('cannot touch other wards, other in-charges, or anything but approval', async () => {
+    await assertFails(updateDoc(doc(db('ingrid'), 'doctors/quinn'), { approved: true }));
+    await assertFails(deleteDoc(doc(db('ingrid'), 'doctors/quinn')));
+    await assertFails(updateDoc(doc(db('ingrid'), 'doctors/irene'), { approved: true }));
+    await assertFails(updateDoc(doc(db('ingrid'), 'doctors/pete'), { approved: true, wardId: 'dmch-icu' }));
+    await assertFails(updateDoc(doc(db('ingrid'), 'doctors/pete'), { phone: '01999999999' }));
+  });
+
+  it('a regular doctor or a pending in-charge cannot approve', async () => {
+    await assertFails(updateDoc(doc(db('sam'), 'doctors/pete'), { approved: true }));
+    await assertFails(updateDoc(doc(db('irene'), 'doctors/pete'), { approved: true }));
+  });
+
+  it('only the app admin approves an in-charge', async () => {
+    await assertSucceeds(updateDoc(doc(adminDb(), 'doctors/irene'), { approved: true }));
   });
 });
 

@@ -16,6 +16,21 @@ export interface Contact {
   verified: boolean;
   /** Where the number came from (for whoever verifies it). Not shown in the app. */
   source: string;
+  /** This provider's own rate, e.g. "সিলিন্ডার ভাড়া ৳৩৫০/দিন". Only fill in from the provider. */
+  price?: string;
+  /**
+   * Google Maps rating, copied by hand from the provider's Maps page, with the review count and the
+   * date you copied it. Never estimate these. The app always links to the live Maps page anyway.
+   */
+  rating?: { stars: number; reviews: number; checked: string };
+  /** When set, the card links to this Google Maps search so people can read the live reviews. */
+  mapsQuery?: string;
+}
+
+/** A price range seen across many providers, shown as a "roughly what it costs" note. */
+export interface MarketRate {
+  lines: string[];
+  source: string;
 }
 
 /** National numbers shown at the top of every section. Well-established, widely published. */
@@ -118,6 +133,7 @@ export const OXYGEN_CONTACTS: Contact[] = [
     note: 'সিলিন্ডার বাসায় পৌঁছে দেয় · টাকা লাগে',
     phone: '01719677350',
     verified: false,
+    mapsQuery: 'Peace Oxygen Dhaka',
     source: 'peaceoxygen.com (via web search, Oct 2026)',
   },
   {
@@ -125,6 +141,7 @@ export const OXYGEN_CONTACTS: Contact[] = [
     note: 'সিলিন্ডার বাসায় পৌঁছে দেয় · টাকা লাগে',
     phone: '01819644860',
     verified: false,
+    mapsQuery: 'Oxygen Delivery BD Dhaka',
     source: 'oxygendeliverybd.com (via web search, Oct 2026)',
   },
   {
@@ -132,6 +149,7 @@ export const OXYGEN_CONTACTS: Contact[] = [
     note: 'সিলিন্ডার ও রিফিল · টাকা লাগে',
     phone: '01712544008',
     verified: false,
+    mapsQuery: 'Oxygen Cylinder BD Dhaka',
     source: 'oxygencylinder.com.bd (via web search, Oct 2026)',
   },
   {
@@ -139,6 +157,7 @@ export const OXYGEN_CONTACTS: Contact[] = [
     note: 'সিলিন্ডার · টাকা লাগে',
     phone: '01704727361',
     verified: false,
+    mapsQuery: 'Life Line Equipment BD',
     source: 'lifelineequipmentbd.com (via web search, Oct 2026)',
   },
   {
@@ -146,6 +165,63 @@ export const OXYGEN_CONTACTS: Contact[] = [
     note: 'কনসেনট্রেটর ভাড়া ও বিক্রি · টাকা লাগে',
     phone: '01711633404',
     verified: false,
+    mapsQuery: 'BDMEDI oxygen concentrator Dhaka',
     source: 'oxygenconcentratorbd.com (via web search, Oct 2026)',
   },
 ];
+
+export const OXYGEN_RATES: MarketRate = {
+  lines: ['সিলিন্ডার ভাড়া: ৭ দিন প্রায় ৳২,৫০০, ৩০ দিন প্রায় ৳৫,০০০', 'রিফিল: প্রায় ৳৫০০ থেকে ৳১,০০০ (বাসায় এনে দিলে বেশি)'],
+  source: 'ঢাকার অনলাইন বিক্রেতাদের তালিকা, অক্টোবর ২০২৬',
+};
+
+export const AMBULANCE_CONTACTS: Contact[] = [
+  {
+    name: 'আল-মারকাজুল ইসলামী অ্যাম্বুলেন্স',
+    note: 'কম খরচের অ্যাম্বুলেন্স সেবা',
+    phone: '01818732905',
+    verified: false,
+    source: 'dmpnews.org 24/7 ambulance list (via web search, Oct 2026)',
+    mapsQuery: 'Al-Markazul Islami Ambulance Dhaka',
+  },
+  {
+    name: 'ন্যাশনাল অ্যাম্বুলেন্স',
+    note: 'এসি, আইসিইউ অ্যাম্বুলেন্স · টাকা লাগে',
+    phone: '01605777755',
+    verified: false,
+    source: 'nationalambulancebd.com (via web search, Oct 2026)',
+    mapsQuery: 'National Ambulance Dhaka',
+  },
+  {
+    name: 'অ্যাম্বুলেন্স বিডি ২৪',
+    note: 'এসি, নন-এসি, আইসিইউ · টাকা লাগে',
+    phone: '01919339689',
+    verified: false,
+    source: 'ambulancebd24.com (via web search, Oct 2026)',
+    mapsQuery: 'Ambulance BD24 Dhaka',
+  },
+  {
+    name: '২৪ অ্যাম্বুলেন্স',
+    note: 'এসি অ্যাম্বুলেন্স · টাকা লাগে',
+    phone: '01911125156',
+    verified: false,
+    source: '24ambulance.com (via web search, Oct 2026)',
+    mapsQuery: '24 Ambulance Dhaka',
+  },
+  {
+    name: 'সেবা অ্যাম্বুলেন্স সার্ভিস',
+    note: 'টাকা লাগে',
+    phone: '01786433932',
+    verified: false,
+    source: 'sebaambulance.com (via web search, Oct 2026)',
+    mapsQuery: 'Seba Ambulance Service Dhaka',
+  },
+];
+
+export const AMBULANCE_RATES: MarketRate = {
+  lines: [
+    'ঢাকার ভেতরে সাধারণ বা এসি অ্যাম্বুলেন্স: প্রায় ৳২,০০০ থেকে ৳৪,০০০',
+    'আইসিইউ অ্যাম্বুলেন্সে খরচ অনেক বেশি। রওনার আগে ভাড়া ঠিক করে নিন।',
+  ],
+  source: 'ঢাকার অ্যাম্বুলেন্স সার্ভিসগুলোর ওয়েবসাইট, অক্টোবর ২০২৬',
+};

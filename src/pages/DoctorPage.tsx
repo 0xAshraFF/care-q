@@ -1,7 +1,7 @@
-import { ArrowRightLeft, Bell, CircleCheck, Clock, LogOut, Pencil, Search } from 'lucide-react';
+import { ArrowLeft, ArrowRightLeft, Bell, CircleCheck, Clock, LogIn, LogOut, Pencil, UserPlus } from 'lucide-react';
 import { useState } from 'react';
-import type { DoctorProfile, WardState } from '../backend/types';
-import { AdminPanel } from '../components/AdminPanel';
+import type { DoctorProfile, DoctorRole, WardState } from '../backend/types';
+import { AdminPanel, ROLE_LABEL } from '../components/AdminPanel';
 import { IncomingList, ReferSheet, SentList } from '../components/Referrals';
 import { BED_CHOICES, STATUS_META, bedsText } from '../components/WardStatus';
 import { Field, Notice, PageTitle } from '../components/ui';
@@ -12,61 +12,71 @@ import {
   duration,
   formatPhone,
   isValidBdMobile,
-  isValidBmdc,
   normalizeBdMobile,
-  normalizeBmdc,
   timeAgo,
   toEnDigits,
   wardNameKey,
 } from '../lib/bn';
 import { endFromTimeInput, isOnDuty, shiftEndChoices } from '../lib/duty';
 import { askNotifyPermission, notifyPermission } from '../lib/notify';
-import type { Route } from '../lib/hooks';
 import { STALE_AFTER_MS, useApp, useOnDutyDoctors, useWards } from '../state/app';
 
 const NEW_WARD = '__new__';
 
-function SignIn() {
-  const { backend, toast } = useApp();
+/** Sign up and log in are the same Gmail step; what happens next depends on whether a profile exists. */
+export function DoctorAuth() {
+  const { backend, toast, setMode } = useApp();
   const [busy, setBusy] = useState(false);
   const demo = backend?.mode === 'demo';
 
+  const signIn = async () => {
+    if (!backend) return;
+    setBusy(true);
+    try {
+      await backend.signIn();
+    } catch {
+      toast('লগইন হয়নি। আবার চেষ্টা করুন।');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <>
-      <PageTitle title="ডাক্তারদের জন্য" subtitle="রোগী বা স্বজনদের লগইন করতে হবে না।" />
-      <section className="card space-y-4">
-        <ul className="space-y-2.5 text-[16px] text-ink-700">
-          <li className="flex gap-2.5">
-            <CircleCheck className="mt-0.5 shrink-0 text-ok-600" size={20} />
-            নিজের ওয়ার্ডে সিট আছে কি না, এক চাপে জানান।
-          </li>
-          <li className="flex gap-2.5">
-            <CircleCheck className="mt-0.5 shrink-0 text-ok-600" size={20} />
-            রেফার করার আগে অন্য ওয়ার্ডে সিট দেখুন, ডিউটির ডাক্তারকে সরাসরি ফোন করুন।
-          </li>
-          <li className="flex gap-2.5">
-            <CircleCheck className="mt-0.5 shrink-0 text-ok-600" size={20} />
-            ডিউটি শেষ হলে নিজে থেকেই লগ আউট।
-          </li>
-        </ul>
-        <button
-          type="button"
-          className="btn btn-primary w-full"
-          disabled={!backend || busy}
-          onClick={async () => {
-            setBusy(true);
-            try {
-              await backend!.signIn();
-            } catch {
-              toast('লগইন হয়নি। আবার চেষ্টা করুন।');
-            } finally {
-              setBusy(false);
-            }
-          }}
-        >
-          {demo ? 'ডেমো ডাক্তার হিসেবে ঢুকুন' : 'Gmail দিয়ে ঢুকুন'}
+      <PageTitle title="ডাক্তার ও ওয়ার্ড ইনচার্জ" subtitle="রোগী বা স্বজনদের লগইন করতে হবে না।" />
+      <div className="space-y-3">
+        <section className="card space-y-4">
+          <ul className="space-y-2.5 text-[16px] text-ink-700">
+            <li className="flex gap-2.5">
+              <CircleCheck className="mt-0.5 shrink-0 text-ok-600" size={20} />
+              অ্যাপ খুললেই দেখবেন কোন ওয়ার্ডে সিট আছে।
+            </li>
+            <li className="flex gap-2.5">
+              <CircleCheck className="mt-0.5 shrink-0 text-ok-600" size={20} />
+              কয়েকটা চাপেই রেফার, লিখতে হবে না।
+            </li>
+            <li className="flex gap-2.5">
+              <CircleCheck className="mt-0.5 shrink-0 text-ok-600" size={20} />
+              ডিউটি শেষ হলে নিজে থেকেই লগ আউট।
+            </li>
+          </ul>
+          <button type="button" className="btn btn-primary w-full" disabled={!backend || busy} onClick={() => void signIn()}>
+            <UserPlus size={20} /> {demo ? 'সাইন আপ (ডেমো)' : 'Gmail দিয়ে সাইন আপ'}
+          </button>
+          <p className="text-[14px] text-ink-500">
+            প্রথমবার? Gmail দিয়ে ঢুকে নাম, মোবাইল আর ওয়ার্ড দিন। ওয়ার্ড ইনচার্জ অনুমোদন দিলেই শুরু করতে পারবেন।
+          </p>
+        </section>
+        <section className="card flex items-center gap-3 py-3">
+          <p className="min-w-0 flex-1 text-[16px]">আগে সাইন আপ করেছেন?</p>
+          <button type="button" className="btn btn-soft shrink-0 px-4" disabled={!backend || busy} onClick={() => void signIn()}>
+            <LogIn size={19} /> লগইন
+          </button>
+        </section>
+        <button type="button" className="btn btn-ghost w-full" onClick={() => setMode('patient')}>
+          <ArrowLeft size={19} /> রোগী বা স্বজন হিসেবে দেখুন
         </button>
-      </section>
+      </div>
     </>
   );
 }
@@ -75,7 +85,7 @@ function ProfileForm({ existing, onDone }: { existing?: DoctorProfile; onDone?: 
   const { backend, user, toast } = useApp();
   const [name, setName] = useState(existing?.name ?? user?.displayName ?? '');
   const [phone, setPhone] = useState(existing?.phone ?? '');
-  const [bmdc, setBmdc] = useState(existing?.bmdc ?? '');
+  const [role, setRole] = useState<DoctorRole>(existing?.role ?? 'doctor');
   const [hospitalId, setHospitalId] = useState(existing?.hospitalId ?? DEFAULT_HOSPITAL.id);
   const [wardId, setWardId] = useState(existing ? existing.wardId || (existing.newWardName ? NEW_WARD : '') : '');
   const [newWard, setNewWard] = useState(existing?.newWardName ?? '');
@@ -87,17 +97,15 @@ function ProfileForm({ existing, onDone }: { existing?: DoctorProfile; onDone?: 
       ? 'আপনার নাম লিখুন।'
       : !isValidBdMobile(phone)
         ? 'সঠিক মোবাইল নম্বর দিন (01 দিয়ে শুরু, ১১ সংখ্যা)।'
-        : !isValidBmdc(bmdc)
-          ? 'বিএমডিসি রেজিস্ট্রেশন নম্বর দিন।'
-          : wardId === ''
-            ? 'ওয়ার্ড বেছে নিন।'
-            : wardId === NEW_WARD && newWard.trim().length < 2
-              ? 'ওয়ার্ডের নাম লিখুন।'
-              : null;
+        : wardId === ''
+          ? 'ওয়ার্ড বেছে নিন।'
+          : wardId === NEW_WARD && newWard.trim().length < 2
+            ? 'ওয়ার্ডের নাম লিখুন।'
+            : null;
 
-  // Approval is for this name and BMDC number; changing either sends the profile back for review.
+  // Approval is for this person, in this role, on this ward. Changing any of those needs a new one.
   const keepsApproval =
-    existing?.approved === true && existing.name === name.trim() && existing.bmdc === normalizeBmdc(bmdc);
+    existing?.approved === true && existing.name === name.trim() && existing.role === role && existing.wardId === wardId;
 
   const submit = async () => {
     if (!backend || !user || missing) return;
@@ -109,27 +117,19 @@ function ProfileForm({ existing, onDone }: { existing?: DoctorProfile; onDone?: 
         const wardName = cleanWardName(newWard);
         const same = wards.find((w) => wardNameKey(w.nameBn) === wardNameKey(wardName));
         if (same) id = same.id;
-        else if (keepsApproval) id = await backend.addWard(user.uid, hospitalId, wardName);
         else {
-          // Not approved yet: the admin creates this ward when approving.
+          // The app admin creates the ward when approving.
           id = '';
           requested = wardName;
         }
       }
       await backend.saveProfile(
         user.uid,
-        {
-          name: name.trim(),
-          phone: normalizeBdMobile(phone),
-          bmdc: normalizeBmdc(bmdc),
-          hospitalId,
-          wardId: id,
-          newWardName: requested,
-        },
+        { name: name.trim(), phone: normalizeBdMobile(phone), role, hospitalId, wardId: id, newWardName: requested },
         keepsApproval,
         keepsApproval ? (existing?.dutyUntil ?? null) : null,
       );
-      toast('সেভ হয়েছে');
+      toast(existing ? 'সেভ হয়েছে' : 'জমা হয়েছে');
       onDone?.();
     } catch {
       toast('সেভ হয়নি। ইন্টারনেট দেখে আবার চেষ্টা করুন।');
@@ -141,8 +141,8 @@ function ProfileForm({ existing, onDone }: { existing?: DoctorProfile; onDone?: 
   return (
     <>
       <PageTitle
-        title={existing ? 'আপনার তথ্য' : 'একবার নিজের তথ্য দিন'}
-        subtitle={existing ? undefined : 'যাচাই করে অনুমোদন দেওয়া হবে। পরের বার থেকে শুধু লগইন করলেই হবে।'}
+        title={existing ? 'আপনার তথ্য' : 'সাইন আপ'}
+        subtitle={existing ? undefined : 'একবারই লাগবে। পরের বার থেকে শুধু লগইন।'}
       />
       <form
         className="card space-y-5"
@@ -166,18 +166,21 @@ function ProfileForm({ existing, onDone }: { existing?: DoctorProfile; onDone?: 
             onChange={(e) => setPhone(toEnDigits(e.target.value))}
           />
         </Field>
-        <Field label="বিএমডিসি রেজিস্ট্রেশন নম্বর" htmlFor="doc-bmdc" hint="যাচাইয়ের জন্য লাগবে।">
-          <input
-            id="doc-bmdc"
-            className="input tabular-nums"
-            autoCapitalize="characters"
-            autoComplete="off"
-            placeholder="যেমন: A-12345"
-            maxLength={20}
-            value={bmdc}
-            onChange={(e) => setBmdc(toEnDigits(e.target.value))}
-          />
-        </Field>
+        <fieldset>
+          <legend className="label">আপনি</legend>
+          <div className="grid grid-cols-2 gap-2">
+            {(['doctor', 'incharge'] as DoctorRole[]).map((r) => (
+              <button key={r} type="button" className="chip" aria-pressed={role === r} onClick={() => setRole(r)}>
+                {ROLE_LABEL[r]}
+              </button>
+            ))}
+          </div>
+          <p className="mt-1.5 text-[14px] text-ink-500">
+            {role === 'incharge'
+              ? 'আপনার ওয়ার্ডের ডাক্তারদের অনুমোদন আপনি দেবেন। আপনাকে অনুমোদন দেবেন অ্যাপ অ্যাডমিন।'
+              : 'আপনার ওয়ার্ডের ইনচার্জ অনুমোদন দেবেন।'}
+          </p>
+        </fieldset>
         {HOSPITALS.length > 1 && (
           <Field label="হাসপাতাল" htmlFor="doc-hospital">
             <select
@@ -197,7 +200,7 @@ function ProfileForm({ existing, onDone }: { existing?: DoctorProfile; onDone?: 
             </select>
           </Field>
         )}
-        <Field label={`কোন ওয়ার্ডে ডিউটি করেন (${findHospital(hospitalId)?.shortBn ?? ''})`} htmlFor="doc-ward">
+        <Field label={`কোন ওয়ার্ডে (${findHospital(hospitalId)?.shortBn ?? ''})`} htmlFor="doc-ward">
           <select id="doc-ward" className="input" value={wardId} onChange={(e) => setWardId(e.target.value)}>
             <option value="">ওয়ার্ড বেছে নিন</option>
             {wards.map((w) => (
@@ -209,7 +212,7 @@ function ProfileForm({ existing, onDone }: { existing?: DoctorProfile; onDone?: 
           </select>
         </Field>
         {wardId === NEW_WARD && (
-          <Field label="ওয়ার্ড বা ইউনিটের নাম" htmlFor="doc-new-ward" hint="অন্য ডাক্তাররাও এই নামেই খুঁজবেন।">
+          <Field label="ওয়ার্ড বা ইউনিটের নাম" htmlFor="doc-new-ward" hint="অ্যাপ অ্যাডমিন অনুমোদন দিলে তালিকায় যোগ হবে।">
             <input
               id="doc-new-ward"
               className="input"
@@ -221,7 +224,7 @@ function ProfileForm({ existing, onDone }: { existing?: DoctorProfile; onDone?: 
           </Field>
         )}
         {existing?.approved && !keepsApproval && missing === null && (
-          <Notice tone="warn">নাম বা বিএমডিসি নম্বর বদলালে আবার অনুমোদন লাগবে।</Notice>
+          <Notice tone="warn">নাম, ভূমিকা বা ওয়ার্ড বদলালে আবার অনুমোদন লাগবে।</Notice>
         )}
         {missing && <p className="text-[15px] font-medium text-warn-700">{missing}</p>}
         <div className="flex gap-2">
@@ -241,25 +244,26 @@ function ProfileForm({ existing, onDone }: { existing?: DoctorProfile; onDone?: 
 
 function PendingCard({ profile }: { profile: DoctorProfile }) {
   const { wards } = useWards(profile.hospitalId);
-  const ward = profile.wardId
-    ? (wards.find((w) => w.id === profile.wardId)?.nameBn ?? '…')
-    : `${profile.newWardName} (নতুন)`;
+  const wardName = profile.wardId ? (wards.find((w) => w.id === profile.wardId)?.nameBn ?? '…') : '';
+  const byAdmin = profile.role === 'incharge' || !profile.wardId;
   return (
-    <section className="card space-y-3 border-[#f3dfb4] bg-warn-50">
+    <section className="card space-y-3 border-warn-100 bg-warn-50">
       <p className="flex items-center gap-2 font-semibold text-warn-700">
         <Clock size={20} /> অনুমোদনের অপেক্ষায়
       </p>
       <p className="text-[16px] text-ink-700">
-        আপনার তথ্য জমা হয়েছে। অ্যাডমিন ফোনে যাচাই করে অনুমোদন দিলে নিজের ওয়ার্ডের অবস্থা জানাতে আর অন্য
-        ডাক্তারদের নম্বর দেখতে পারবেন। অনুমোদন হলে এই পাতা নিজে থেকেই বদলে যাবে।
+        {byAdmin
+          ? 'অ্যাপ অ্যাডমিন ফোনে নিশ্চিত হয়ে অনুমোদন দেবেন।'
+          : `${wardName}-এর ইনচার্জ অনুমোদন দেবেন। ওনাকে একবার জানিয়ে রাখুন।`}{' '}
+        অনুমোদন হলে এই পাতা নিজে থেকেই বদলে যাবে। এর মধ্যে রক্ত, আইসিইউ আর অক্সিজেনের তথ্য দেখতে পারবেন।
       </p>
       <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 rounded-xl bg-white px-3.5 py-3 text-[15px]">
         <dt className="text-ink-500">মোবাইল</dt>
         <dd className="tabular-nums">{formatPhone(profile.phone)}</dd>
-        <dt className="text-ink-500">বিএমডিসি</dt>
-        <dd>{profile.bmdc}</dd>
+        <dt className="text-ink-500">ভূমিকা</dt>
+        <dd>{ROLE_LABEL[profile.role]}</dd>
         <dt className="text-ink-500">ওয়ার্ড</dt>
-        <dd>{ward}</dd>
+        <dd>{profile.wardId ? wardName : `${profile.newWardName} (নতুন)`}</dd>
       </dl>
     </section>
   );
@@ -478,8 +482,9 @@ function MyWardCard({ profile }: { profile: DoctorProfile }) {
   );
 }
 
-export function DoctorPage({ go }: { go: (r: Route) => void }) {
-  const { backend, authReady, user, profile, now, isAdmin, adminChecked, endDutyAndSignOut } = useApp();
+/** The "আমার" tab: sign up / log in, pending status, or duty, own ward, referrals and approvals. */
+export function DoctorPage() {
+  const { backend, authReady, user, profile, now, isSuperAdmin, isIncharge, adminChecked, endDutyAndSignOut } = useApp();
   const [editing, setEditing] = useState(false);
   const [joining, setJoining] = useState(false);
   const [referring, setReferring] = useState(false);
@@ -488,7 +493,7 @@ export function DoctorPage({ go }: { go: (r: Route) => void }) {
   if (!backend || !authReady || (user && (profile === undefined || !adminChecked))) {
     return <p className="card text-ink-500">লোড হচ্ছে…</p>;
   }
-  if (!user) return <SignIn />;
+  if (!user) return <DoctorAuth />;
   if (editing && profile) return <ProfileForm existing={profile} onDone={() => setEditing(false)} />;
 
   const footer = (
@@ -510,12 +515,12 @@ export function DoctorPage({ go }: { go: (r: Route) => void }) {
     </div>
   );
 
-  // Signed in, no doctor profile: an admin who isn't a doctor, or a doctor registering.
+  // Signed in without a profile: the app admin (who may not be a doctor), or a doctor signing up.
   if (!profile) {
-    if (isAdmin && !joining) {
+    if (isSuperAdmin && !joining) {
       return (
         <>
-          <PageTitle title="অ্যাডমিন" subtitle="নতুন ডাক্তারকে ফোন করে বিএমডিসি নম্বর ও ওয়ার্ড মিলিয়ে অনুমোদন দিন।" />
+          <PageTitle title="অ্যাপ অ্যাডমিন" subtitle="ওয়ার্ড ইনচার্জদের ফোন করে নিশ্চিত হয়ে অনুমোদন দিন।" />
           <div className="space-y-4">
             <AdminPanel />
             <button type="button" className="btn btn-soft w-full" onClick={() => setJoining(true)}>
@@ -526,7 +531,12 @@ export function DoctorPage({ go }: { go: (r: Route) => void }) {
         </>
       );
     }
-    return <ProfileForm onDone={isAdmin ? () => setJoining(false) : undefined} />;
+    return (
+      <>
+        <ProfileForm onDone={isSuperAdmin ? () => setJoining(false) : undefined} />
+        {!isSuperAdmin && footer}
+      </>
+    );
   }
 
   const hospital = findHospital(profile.hospitalId) ?? DEFAULT_HOSPITAL;
@@ -537,7 +547,7 @@ export function DoctorPage({ go }: { go: (r: Route) => void }) {
         <PageTitle title={profile.name} subtitle={hospital.shortBn} />
         <div className="space-y-4">
           <PendingCard profile={profile} />
-          {isAdmin && <AdminPanel />}
+          {isSuperAdmin && <AdminPanel />}
           {footer}
         </div>
       </>
@@ -548,27 +558,21 @@ export function DoctorPage({ go }: { go: (r: Route) => void }) {
 
   return (
     <>
-      <PageTitle title={profile.name} subtitle={`${hospital.shortBn} · ${ward?.nameBn ?? '…'}`} />
+      <PageTitle
+        title={profile.name}
+        subtitle={`${ROLE_LABEL[profile.role]} · ${ward?.nameBn ?? '…'} · ${hospital.shortBn}`}
+      />
       <div className="space-y-4">
         <DutyCard key={isOnDuty(profile.dutyUntil, now) ? 'on' : 'off'} profile={profile} wardFull={ward?.status === 'full'} />
         <NotifyPrompt />
         <IncomingList />
+        {(isIncharge || isSuperAdmin) && <AdminPanel />}
         <MyWardCard profile={profile} />
-        <div className="space-y-2">
-          <button type="button" className="btn btn-primary min-h-15 w-full text-[18px]" onClick={() => setReferring(true)}>
-            <ArrowRightLeft size={21} /> রোগী রেফার করুন
-          </button>
-          <button type="button" className="btn btn-ghost w-full" onClick={() => go('ward')}>
-            <Search size={19} /> সব ওয়ার্ডের অবস্থা দেখুন
-          </button>
-        </div>
+        <button type="button" className="btn btn-primary min-h-15 w-full text-[18px]" onClick={() => setReferring(true)}>
+          <ArrowRightLeft size={21} /> রোগী রেফার করুন
+        </button>
         <SentList />
         <ReferSheet open={referring} onClose={() => setReferring(false)} />
-        {isAdmin && (
-          <div className="pt-4">
-            <AdminPanel />
-          </div>
-        )}
         {footer}
       </div>
     </>

@@ -2,11 +2,12 @@ rules_version = '2';
 
 // /wards/{wardId}     public read. Built-in wards (src/data/hospitals.ts) only store status here;
 //                     doctor-added wards also store nameBn + custom: true.
-// /doctors/{uid}      a doctor's profile. `approved` is set only by an admin; until then the
-//                     doctor sees what patients see.
+// /doctors/{uid}      a doctor's profile, role 'doctor' or 'incharge'. `approved` is set by the
+//                     ward's in-charge (for doctors) or the app admin (for in-charges, and for
+//                     anyone asking for a new ward). Until then the doctor sees what patients see.
 // /transfers/{id}     a referral from one ward to another. Readable by the sender and by approved
 //                     doctors of the receiving ward, who accept or decline it.
-// /config/admins      { emails: [...] } — Gmail addresses allowed to approve doctors.
+// /config/admins      { emails: [...] } — the app owner's Gmail address(es): approves in-charges.
 //                     Create it by hand in the Firebase console. Clients can't write it.
 
 service cloud.firestore {
@@ -20,7 +21,7 @@ service cloud.firestore {
       return /databases/$(database)/documents/doctors/$(request.auth.uid);
     }
 
-    // Registered AND approved by an admin.
+    // Registered AND approved.
     function isDoctor() {
       return signedIn() && exists(doctorPath()) && get(doctorPath()).data.approved == true;
     }
@@ -29,6 +30,12 @@ service cloud.firestore {
       return isDoctor() && get(doctorPath()).data.wardId == wardId;
     }
 
+    // An approved in-charge of this ward.
+    function isInchargeOf(wardId) {
+      return isDoctor() && get(doctorPath()).data.role == 'incharge' && get(doctorPath()).data.wardId == wardId;
+    }
+
+    // The app owner.
     function isAdmin() {
       return signedIn()
         && request.auth.token.email_verified == true
@@ -136,10 +143,10 @@ service cloud.firestore {
     match /doctors/{uid} {
       function validProfile() {
         let d = request.resource.data;
-        return d.keys().hasOnly(['name', 'phone', 'bmdc', 'hospitalId', 'wardId', 'newWardName', 'approved', 'dutyUntil', 'updatedAt'])
+        return d.keys().hasOnly(['name', 'phone', 'role', 'hospitalId', 'wardId', 'newWardName', 'approved', 'dutyUntil', 'updatedAt'])
           && d.name is string && d.name.size() >= 2 && d.name.size() <= 60
           && d.phone is string && d.phone.matches('^01[3-9][0-9]{8}$')
-          && d.bmdc is string && d.bmdc.size() >= 2 && d.bmdc.size() <= 20
+          && d.role in ['doctor', 'incharge']
           && d.hospitalId is string && d.hospitalId.size() <= 40
           && d.wardId is string && d.wardId.size() <= 100
           && d.newWardName is string && d.newWardName.size() <= 60
@@ -160,14 +167,23 @@ service cloud.firestore {
         && validProfile()
         && request.resource.data.approved == false;
 
-      // A doctor edits their own profile. Approval survives only while name and BMDC number stay the same.
+      // A doctor edits their own profile. Approval is for this person, role and ward: it survives only
+      // while name, role and ward stay the same.
       allow update: if signedIn() && request.auth.uid == uid
         && validProfile()
         && request.resource.data.approved == (resource.data.approved == true
              && request.resource.data.name == resource.data.name
-             && request.resource.data.bmdc == resource.data.bmdc);
+             && request.resource.data.role == resource.data.role
+             && request.resource.data.wardId == resource.data.wardId);
 
-      // Admins approve, revoke (clearing any duty), and assign the ward they created on approval.
+      // A ward's in-charge approves or revokes doctors (not in-charges) of that ward, nothing else.
+      allow update: if resource.data.role == 'doctor'
+        && isInchargeOf(resource.data.wardId)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['approved', 'dutyUntil'])
+        && request.resource.data.approved is bool
+        && (request.resource.data.dutyUntil == resource.data.dutyUntil || request.resource.data.dutyUntil == null);
+
+      // The app admin approves anyone, revokes (clearing any duty), and assigns the ward they created on approval.
       allow update: if isAdmin()
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['approved', 'wardId', 'newWardName', 'dutyUntil'])
         && request.resource.data.approved is bool
@@ -175,7 +191,8 @@ service cloud.firestore {
         && request.resource.data.newWardName is string && request.resource.data.newWardName.size() <= 60
         && (request.resource.data.dutyUntil == resource.data.dutyUntil || request.resource.data.dutyUntil == null);
 
-      allow delete: if signedIn() && (request.auth.uid == uid || isAdmin());
+      allow delete: if signedIn()
+        && (request.auth.uid == uid || isAdmin() || (resource.data.role == 'doctor' && isInchargeOf(resource.data.wardId)));
     }
   }
 }
