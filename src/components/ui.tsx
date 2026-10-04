@@ -60,35 +60,6 @@ export function Field({
   );
 }
 
-export function Segmented<T extends string>({
-  options,
-  value,
-  onChange,
-}: {
-  options: { id: T; label: string }[];
-  value: T;
-  onChange: (v: T) => void;
-}) {
-  return (
-    <div role="tablist" className="mb-4 grid grid-flow-col gap-1 rounded-xl bg-brand-100 p-1">
-      {options.map((o) => (
-        <button
-          key={o.id}
-          role="tab"
-          type="button"
-          aria-selected={o.id === value}
-          onClick={() => onChange(o.id)}
-          className={`min-h-11 rounded-lg text-[16px] font-semibold transition-colors ${
-            o.id === value ? 'bg-white text-brand-700 shadow-sm' : 'text-ink-500'
-          }`}
-        >
-          {o.label}
-        </button>
-      ))}
-    </div>
-  );
-}
-
 /** Round call button; whole parent row is usually the tel: link. */
 export function CallCircle() {
   return (

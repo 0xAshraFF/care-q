@@ -1,10 +1,10 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { getBackend, type Backend } from '../backend';
-import type { AuthUser, DoctorProfile, WardDoc } from '../backend/types';
+import type { AuthUser, DoctorProfile, Transfer, Unsub, WardDoc } from '../backend/types';
 import { findHospital } from '../data/hospitals';
 import { useNow } from '../lib/hooks';
 
-export type WardStatus = 'open' | 'full' | 'unknown';
+export type WardStatus = 'open' | 'emergency' | 'full' | 'unknown';
 
 export interface WardView {
   id: string;
@@ -12,6 +12,8 @@ export interface WardView {
   nameBn: string;
   custom: boolean;
   status: WardStatus;
+  /** Optional, only when the ward's doctor gave one. 11 means "more than 10". */
+  freeBeds: number | null;
   updatedAt?: number;
   updatedByUid?: string;
 }
@@ -149,8 +151,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
 function mergeWards(hospitalId: string, docs: WardDoc[]): WardView[] {
   const hospital = findHospital(hospitalId);
   const byId = new Map(docs.map((d) => [d.id, d]));
-  const status = (d: WardDoc | undefined): Pick<WardView, 'status' | 'updatedAt' | 'updatedByUid'> => ({
-    status: d?.full === true ? 'full' : d?.full === false ? 'open' : 'unknown',
+  const status = (d: WardDoc | undefined): Pick<WardView, 'status' | 'freeBeds' | 'updatedAt' | 'updatedByUid'> => ({
+    status: d?.status ?? 'unknown',
+    freeBeds: d?.status && d.status !== 'full' ? (d.freeBeds ?? null) : null,
     updatedAt: d?.updatedAt,
     updatedByUid: d?.updatedByUid,
   });
@@ -193,31 +196,79 @@ export function useWards(hospitalId: string) {
   return { wards, loaded, error };
 }
 
-/** On-duty doctors, live. Empty for patients (they're not allowed to read doctor numbers). */
-export function useOnDutyDoctors(): DoctorProfile[] {
-  const { backend, isDoctor, now } = useApp();
-  const [docs, setDocs] = useState<DoctorProfile[]>([]);
+type Listen<T> = (cb: (v: T[]) => void, onError: (e: Error) => void) => Unsub;
+
+/**
+ * A live list that restarts itself after an error. Right after approval, the doctor's profile may
+ * not have reached the server yet, so the rules reject the query; a rejected listener is dead.
+ * `listen` is null when there's nothing to watch. `key` changes when the query changes.
+ */
+function useRetryingList<T>(listen: Listen<T> | null, key: string): T[] {
+  const [items, setItems] = useState<T[]>([]);
   const [attempt, setAttempt] = useState(0);
+  const listenRef = useRef(listen);
+  listenRef.current = listen;
+  const active = listen !== null;
 
   useEffect(() => {
-    if (!backend || !isDoctor) {
-      setDocs([]);
+    const start = listenRef.current;
+    if (!start) {
+      setItems([]);
       return;
     }
-    // Right after registering, the profile may not have reached the server yet, so the rules
-    // reject this query. A rejected listener is dead; retry shortly instead of staying empty.
     let retry: ReturnType<typeof setTimeout> | undefined;
-    const off = backend.watchOnDutyDoctors(setDocs, () => {
-      setDocs([]);
+    const off = start(setItems, () => {
+      setItems([]);
       retry = setTimeout(() => setAttempt((a) => a + 1), Math.min(3000 * 2 ** attempt, 60_000));
     });
     return () => {
       clearTimeout(retry);
       off();
     };
-  }, [backend, isDoctor, attempt]);
+  }, [active, key, attempt]);
 
+  return items;
+}
+
+/** On-duty doctors, live. Empty for patients (they're not allowed to read doctor numbers). */
+export function useOnDutyDoctors(): DoctorProfile[] {
+  const { backend, isDoctor, now } = useApp();
+  const docs = useRetryingList<DoctorProfile>(
+    backend && isDoctor ? (cb, err) => backend.watchOnDutyDoctors(cb, err) : null,
+    'on-duty',
+  );
   return useMemo(() => docs.filter((d) => d.dutyUntil !== null && d.dutyUntil > now), [docs, now]);
+}
+
+/** Pending referrals older than this stop popping up and drop off the list. */
+export const REFERRAL_TTL_MS = 6 * 60 * 60_000;
+
+/** Pending referrals to the signed-in doctor's ward, newest first. */
+export function useIncomingTransfers(): Transfer[] {
+  const { backend, isDoctor, profile, now } = useApp();
+  const wardId = isDoctor && profile ? profile.wardId : '';
+  const items = useRetryingList<Transfer>(
+    backend && wardId ? (cb, err) => backend.watchIncomingTransfers(wardId, cb, err) : null,
+    `in:${wardId}`,
+  );
+  return useMemo(
+    () => items.filter((t) => now - t.createdAt < REFERRAL_TTL_MS).sort((a, b) => b.createdAt - a.createdAt),
+    [items, now],
+  );
+}
+
+/** Referrals the signed-in doctor sent in the last 24 hours, newest first. */
+export function useSentTransfers(): Transfer[] {
+  const { backend, isDoctor, user, now } = useApp();
+  const uid = isDoctor && user ? user.uid : '';
+  const items = useRetryingList<Transfer>(
+    backend && uid ? (cb, err) => backend.watchSentTransfers(uid, cb, err) : null,
+    `out:${uid}`,
+  );
+  return useMemo(
+    () => items.filter((t) => now - t.createdAt < 24 * 60 * 60_000).sort((a, b) => b.createdAt - a.createdAt),
+    [items, now],
+  );
 }
 
 export { mergeWards };

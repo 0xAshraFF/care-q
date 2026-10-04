@@ -1,11 +1,13 @@
-import { useState, type ReactNode } from 'react';
+import { ArrowDown, PenLine, Phone } from 'lucide-react';
+import { useRef, useState, type ReactNode } from 'react';
 import { ContactList } from '../components/ContactList';
 import { ShareBar } from '../components/ShareBar';
-import { ChipGroup, Field, PageTitle, Segmented } from '../components/ui';
+import { ChipGroup, Field, PageTitle } from '../components/ui';
 import { BLOOD_CONTACTS, ICU_CONTACTS, OXYGEN_CONTACTS, type Contact } from '../data/directory';
 import { DEFAULT_HOSPITAL } from '../data/hospitals';
 import { isValidBdMobile, toBnDigits, toEnDigits } from '../lib/bn';
 import { useStoredState } from '../lib/hooks';
+import { useWards } from '../state/app';
 import {
   BLOOD_GROUPS,
   ICU_TYPES,
@@ -20,36 +22,48 @@ import {
   type When,
 } from '../lib/messages';
 
-type Tab = 'call' | 'post';
-
+/** One scrolling page: numbers to call first, then the post maker. No tabs to switch. */
 function ResourcePage({
-  id,
   title,
   subtitle,
   contacts,
   tip,
   form,
 }: {
-  id: string;
   title: string;
   subtitle: string;
   contacts: Contact[];
   tip: string;
   form: ReactNode;
 }) {
-  const [tab, setTab] = useStoredState<Tab>(`careq-tab-${id}`, 'call');
+  const postRef = useRef<HTMLElement>(null);
   return (
     <>
       <PageTitle title={title} subtitle={subtitle} />
-      <Segmented<Tab>
-        value={tab}
-        onChange={setTab}
-        options={[
-          { id: 'call', label: 'ফোন করুন' },
-          { id: 'post', label: 'পোস্ট বানান' },
-        ]}
-      />
-      {tab === 'call' ? <ContactList contacts={contacts} tip={tip} /> : form}
+      <button
+        type="button"
+        className="btn btn-soft mb-5 w-full"
+        onClick={() => postRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+      >
+        <PenLine size={19} /> পোস্ট বানাতে চান? <ArrowDown size={18} />
+      </button>
+
+      <section className="space-y-3">
+        <h2 className="flex items-center gap-2 px-1 text-[18px] font-semibold">
+          <Phone size={20} className="text-brand-600" /> সরাসরি ফোন করুন
+        </h2>
+        <ContactList contacts={contacts} tip={tip} />
+      </section>
+
+      <section ref={postRef} className="mt-8 scroll-mt-20 space-y-3">
+        <div className="px-1">
+          <h2 className="flex items-center gap-2 text-[18px] font-semibold">
+            <PenLine size={20} className="text-brand-600" /> পোস্ট বানিয়ে শেয়ার করুন
+          </h2>
+          <p className="text-[15px] text-ink-500">ঘরগুলো পূরণ করলেই লেখা তৈরি হয়ে যাবে।</p>
+        </div>
+        <div className="card">{form}</div>
+      </section>
     </>
   );
 }
@@ -112,7 +126,11 @@ function BloodForm() {
   const [problem, setProblem] = useState('');
   const [hospital, setHospital] = useStoredState('careq-post-hospital', DEFAULT_HOSPITAL.nameBn);
   const [ward, setWard] = useState('');
+  const [bed, setBed] = useState('');
   const [phone, setPhone] = useStoredState('careq-post-phone', '');
+  const { wards } = useWards(DEFAULT_HOSPITAL.id);
+  const atDefault = hospital.trim() === DEFAULT_HOSPITAL.nameBn;
+  const wardLine = [ward.trim(), bed.trim() && `বেড ${bed.trim()}`].filter(Boolean).join(', ');
 
   const missing =
     group === ''
@@ -145,11 +163,27 @@ function BloodForm() {
       <ChipGroup label="কখন লাগবে" options={WHEN_OPTIONS} value={when} onChange={setWhen} />
       <TextField id="blood-problem" label="রোগীর সমস্যা (না দিলেও চলবে)" placeholder="যেমন: সিজার, ডেঙ্গু, অপারেশন" value={problem} onChange={setProblem} />
       <TextField id="blood-hospital" label="হাসপাতাল" value={hospital} onChange={setHospital} />
-      <TextField id="blood-ward" label="ওয়ার্ড ও বেড (না দিলেও চলবে)" placeholder="যেমন: মেডিসিন, বেড ১২" value={ward} onChange={setWard} />
+      <div className="grid grid-cols-[3fr_2fr] gap-2">
+        {atDefault ? (
+          <Field label="ওয়ার্ড (না দিলেও চলবে)" htmlFor="blood-ward">
+            <select id="blood-ward" className="input" value={ward} onChange={(e) => setWard(e.target.value)}>
+              <option value="">ওয়ার্ড</option>
+              {wards.map((w) => (
+                <option key={w.id} value={w.nameBn}>
+                  {w.nameBn}
+                </option>
+              ))}
+            </select>
+          </Field>
+        ) : (
+          <TextField id="blood-ward" label="ওয়ার্ড (না দিলেও চলবে)" placeholder="যেমন: মেডিসিন" value={ward} onChange={setWard} />
+        )}
+        <TextField id="blood-bed" label="বেড নম্বর" inputMode="numeric" placeholder="যেমন: ১২" value={bed} onChange={setBed} />
+      </div>
       <PhoneField value={phone} onChange={setPhone} />
       <ShareBar
         missing={missing}
-        text={bloodMessage({ group: group || ('?' as BloodGroup), bags, when, problem, hospital, ward, phone })}
+        text={bloodMessage({ group: group || ('?' as BloodGroup), bags, when, problem, hospital, ward: wardLine, phone })}
       />
     </div>
   );
@@ -198,7 +232,6 @@ function OxygenForm() {
 export function BloodPage() {
   return (
     <ResourcePage
-      id="blood"
       title="রক্ত লাগবে?"
       subtitle="ব্লাড ব্যাংকে ফোন করুন, অথবা পোস্ট বানিয়ে Facebook, WhatsApp-এ দিন।"
       contacts={BLOOD_CONTACTS}
@@ -211,7 +244,6 @@ export function BloodPage() {
 export function IcuPage() {
   return (
     <ResourcePage
-      id="icu"
       title="আইসিইউ খুঁজছেন?"
       subtitle="হাসপাতালে সরাসরি ফোন করুন, অথবা পোস্ট দিয়ে সবাইকে জানান।"
       contacts={ICU_CONTACTS}
@@ -224,7 +256,6 @@ export function IcuPage() {
 export function OxygenPage() {
   return (
     <ResourcePage
-      id="oxygen"
       title="অক্সিজেন লাগবে?"
       subtitle="সরবরাহকারীকে ফোন করুন, অথবা পোস্ট দিয়ে সবাইকে জানান।"
       contacts={OXYGEN_CONTACTS}

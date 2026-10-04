@@ -1,7 +1,9 @@
-import { CircleCheck, CircleX, Clock, LogOut, Pencil, Search } from 'lucide-react';
+import { ArrowRightLeft, Bell, CircleCheck, Clock, LogOut, Pencil, Search } from 'lucide-react';
 import { useState } from 'react';
-import type { DoctorProfile } from '../backend/types';
+import type { DoctorProfile, WardState } from '../backend/types';
 import { AdminPanel } from '../components/AdminPanel';
+import { IncomingList, ReferSheet, SentList } from '../components/Referrals';
+import { BED_CHOICES, STATUS_META, bedsText } from '../components/WardStatus';
 import { Field, Notice, PageTitle } from '../components/ui';
 import { DEFAULT_HOSPITAL, HOSPITALS, findHospital } from '../data/hospitals';
 import {
@@ -18,6 +20,7 @@ import {
   wardNameKey,
 } from '../lib/bn';
 import { endFromTimeInput, isOnDuty, shiftEndChoices } from '../lib/duty';
+import { askNotifyPermission, notifyPermission } from '../lib/notify';
 import type { Route } from '../lib/hooks';
 import { STALE_AFTER_MS, useApp, useOnDutyDoctors, useWards } from '../state/app';
 
@@ -273,37 +276,35 @@ function DutyCard({ profile, wardFull }: { profile: DoctorProfile; wardFull: boo
 
   if (onDuty && !editing) {
     return (
-      <section className="card space-y-3 border-ok-100 bg-ok-50">
-        <p className="flex items-center gap-2 font-semibold text-ok-700">
-          <span className="size-2.5 rounded-full bg-ok-600" /> ডিউটিতে আছেন
-        </p>
-        <div>
-          <p className="text-[22px] leading-tight font-semibold">{clockTimeWithDay(profile.dutyUntil!, now)} পর্যন্ত</p>
-          <p className="text-[15px] text-ink-500">আর {duration(profile.dutyUntil! - now)}। তারপর নিজে থেকেই লগ আউট হবে।</p>
+      <section className="card flex items-center gap-3 border-ok-100 bg-ok-50 py-3">
+        <div className="min-w-0 flex-1">
+          <p className="flex items-center gap-2 text-[15px] font-semibold text-ok-700">
+            <span className="size-2.5 rounded-full bg-ok-600" /> ডিউটিতে আছেন
+          </p>
+          <p className="text-[17px] leading-snug font-semibold">{clockTimeWithDay(profile.dutyUntil!, now)} পর্যন্ত</p>
+          <p className="text-[14px] text-ink-500">
+            আর {duration(profile.dutyUntil! - now)} ·{' '}
+            {wardFull ? 'সিট নেই বলে আপনার নম্বর লুকানো' : 'অন্যরা আপনার নম্বর দেখছেন'} ·{' '}
+            <button type="button" className="font-medium text-brand-700 underline" onClick={() => setEditing(true)}>
+              সময় বদলান
+            </button>
+          </p>
         </div>
-        <p className="text-[15px] text-ink-700">
-          {wardFull
-            ? 'ওয়ার্ডে সিট নেই বলে আপনার নম্বর এখন অন্যরা দেখছেন না।'
-            : 'অন্য ওয়ার্ডের ডাক্তাররা আপনার নম্বর দেখে ফোন করতে পারবেন।'}
-        </p>
-        <div className="grid grid-cols-2 gap-2">
-          <button type="button" className="btn btn-soft bg-white" onClick={() => setEditing(true)}>
-            সময় বদলান
-          </button>
-          <button
-            type="button"
-            className="btn border border-bad-100 bg-white text-bad-700 active:bg-bad-50"
-            onClick={() => void endDutyAndSignOut()}
-          >
-            <LogOut size={19} /> ডিউটি শেষ
-          </button>
-        </div>
+        <button
+          type="button"
+          className="btn shrink-0 border border-bad-100 bg-white px-3 text-[15px] text-bad-700 active:bg-bad-50"
+          onClick={() => void endDutyAndSignOut()}
+        >
+          <LogOut size={18} /> ডিউটি শেষ
+        </button>
       </section>
     );
   }
 
   const start = async () => {
     if (!backend || until === null) return;
+    // Still inside the tap, so the browser allows the permission prompt.
+    void askNotifyPermission();
     setEditing(false);
     try {
       await backend.setDuty(profile.uid, until);
@@ -318,7 +319,7 @@ function DutyCard({ profile, wardFull }: { profile: DoctorProfile; wardFull: boo
         <h2 className="text-[19px] font-semibold">{editing ? 'ডিউটি কখন শেষ?' : 'ডিউটিতে আছেন?'}</h2>
         {!editing && (
           <p className="text-[15px] text-ink-500">
-            চালু করলে অন্য ওয়ার্ডের ডাক্তাররা দরকারে আপনাকে ফোন করতে পারবেন। ডিউটি কখন শেষ?
+            চালু করলে অন্য ওয়ার্ডের ডাক্তাররা আপনাকে ফোন ও রেফার করতে পারবেন। ডিউটি শেষ হলে নিজে থেকেই লগ আউট।
           </p>
         )}
       </div>
@@ -334,6 +335,7 @@ function DutyCard({ profile, wardFull }: { profile: DoctorProfile; wardFull: boo
       </div>
       {pick === 'other' && (
         <input
+          id="duty-other-time"
           type="time"
           className="input"
           aria-label="ডিউটি শেষের সময়"
@@ -360,6 +362,33 @@ function DutyCard({ profile, wardFull }: { profile: DoctorProfile; wardFull: boo
   );
 }
 
+function NotifyPrompt() {
+  const [perm, setPerm] = useState(notifyPermission);
+  if (perm === 'granted' || perm === 'unsupported') return null;
+  if (perm === 'denied') {
+    return (
+      <p className="px-1 text-[14px] text-ink-500">
+        রেফারের নোটিফিকেশন বন্ধ আছে। চালু করতে ব্রাউজারের সেটিংসে এই সাইটকে নোটিফিকেশনের অনুমতি দিন।
+      </p>
+    );
+  }
+  return (
+    <section className="card flex items-center gap-3 py-3">
+      <Bell size={22} className="shrink-0 text-brand-600" />
+      <p className="min-w-0 flex-1 text-[15px] leading-snug">রেফার এলে ফোনে নোটিফিকেশন পেতে চান?</p>
+      <button
+        type="button"
+        className="btn btn-soft shrink-0 px-3 text-[15px]"
+        onClick={async () => setPerm(await askNotifyPermission())}
+      >
+        চালু করুন
+      </button>
+    </section>
+  );
+}
+
+const PICKABLE: WardState[] = ['open', 'emergency', 'full'];
+
 function MyWardCard({ profile }: { profile: DoctorProfile }) {
   const { backend, now, toast } = useApp();
   const { wards, loaded } = useWards(profile.hospitalId);
@@ -370,10 +399,10 @@ function MyWardCard({ profile }: { profile: DoctorProfile }) {
     return <Notice tone="warn">আপনার ওয়ার্ডটা তালিকায় পাওয়া যাচ্ছে না। নিচে "তথ্য বদলান" থেকে আবার বেছে নিন।</Notice>;
   }
 
-  const set = (full: boolean) => {
+  const save = (status: WardState, freeBeds: number | null, msg: string) => {
     backend
-      ?.setWardFull(profile.uid, profile.hospitalId, ward.id, full)
-      .then(() => toast(full ? 'জানানো হয়েছে: সিট নেই' : 'জানানো হয়েছে: সিট আছে'))
+      ?.setWardStatus(profile.uid, profile.hospitalId, ward.id, status, status === 'full' ? null : freeBeds)
+      .then(() => toast(msg))
       .catch(() => toast('আপডেট হয়নি। আবার চেষ্টা করুন।'));
   };
 
@@ -381,37 +410,65 @@ function MyWardCard({ profile }: { profile: DoctorProfile }) {
     ward.updatedByUid === profile.uid ? 'আপনি' : onDuty.find((d) => d.uid === ward.updatedByUid)?.name ?? null;
   const stale = ward.updatedAt !== undefined && now - ward.updatedAt > STALE_AFTER_MS;
 
-  const option = (full: boolean) => {
-    const active = ward.status === (full ? 'full' : 'open');
-    const Icon = full ? CircleX : CircleCheck;
-    const tone = full
-      ? active
-        ? 'border-bad-600 bg-bad-600 text-white'
-        : 'border-bad-100 bg-white text-bad-700 active:bg-bad-50'
-      : active
-        ? 'border-ok-600 bg-ok-600 text-white'
-        : 'border-ok-100 bg-white text-ok-700 active:bg-ok-50';
-    return (
-      <button
-        type="button"
-        aria-pressed={active}
-        onClick={() => set(full)}
-        className={`flex min-h-20 flex-col items-center justify-center gap-1 rounded-xl border-2 text-[19px] font-semibold ${tone}`}
-      >
-        <Icon size={28} />
-        {full ? 'সিট নেই' : 'সিট আছে'}
-      </button>
-    );
+  const ACTIVE: Record<WardState, string> = {
+    open: 'border-ok-600 bg-ok-600 text-white',
+    emergency: 'border-warn-600 bg-warn-600 text-white',
+    full: 'border-bad-600 bg-bad-600 text-white',
   };
 
   return (
     <section className="card space-y-3">
-      <h2 className="text-[19px] leading-snug font-semibold">{ward.nameBn}-এ এখন সিট আছে?</h2>
-      <div className="grid grid-cols-2 gap-2">
-        {option(false)}
-        {option(true)}
+      <div>
+        <h2 className="text-[19px] leading-snug font-semibold">{ward.nameBn}-এর অবস্থা</h2>
+        <p className="text-[14px] text-ink-500">চাপ দিলেই সবাই দেখতে পাবেন।</p>
       </div>
-      <p className="text-[15px] text-ink-500">
+      <div className="space-y-2">
+        {PICKABLE.map((s) => {
+          const meta = STATUS_META[s];
+          const active = ward.status === s;
+          return (
+            <button
+              key={s}
+              type="button"
+              aria-pressed={active}
+              onClick={() => save(s, ward.freeBeds, `জানানো হয়েছে: ${meta.label}`)}
+              className={`flex w-full items-center gap-3 rounded-xl border-2 px-4 py-3 text-left transition-colors ${
+                active ? ACTIVE[s] : `${meta.block} bg-white`
+              }`}
+            >
+              <meta.Icon size={28} className="shrink-0" />
+              <span className="min-w-0 flex-1">
+                <span className="block text-[19px] leading-tight font-semibold">{meta.label}</span>
+                <span className={`block text-[14px] leading-snug ${active ? 'text-white/90' : 'text-ink-500'}`}>
+                  {meta.hint}
+                </span>
+              </span>
+              {active && <CircleCheck size={22} className="shrink-0" />}
+            </button>
+          );
+        })}
+      </div>
+      {(ward.status === 'open' || ward.status === 'emergency') && (
+        <Field label="খালি বেড (না দিলেও চলবে)" htmlFor="my-ward-beds">
+          <select
+            id="my-ward-beds"
+            className="input"
+            value={ward.freeBeds ?? ''}
+            onChange={(e) => {
+              const n = e.target.value === '' ? null : Number(e.target.value);
+              save(ward.status as WardState, n, n ? `জানানো হয়েছে: ${bedsText(n)}` : 'বেডের সংখ্যা মুছে দেওয়া হয়েছে');
+            }}
+          >
+            <option value="">জানা নেই</option>
+            {BED_CHOICES.map((n) => (
+              <option key={n} value={n}>
+                {bedsText(n)}
+              </option>
+            ))}
+          </select>
+        </Field>
+      )}
+      <p className="text-[14px] text-ink-500">
         {ward.updatedAt !== undefined
           ? `শেষ আপডেট ${timeAgo(ward.updatedAt, now)}${by ? ` · ${by}` : ''}`
           : 'এখনো কেউ জানায়নি।'}
@@ -425,6 +482,7 @@ export function DoctorPage({ go }: { go: (r: Route) => void }) {
   const { backend, authReady, user, profile, now, isAdmin, adminChecked, endDutyAndSignOut } = useApp();
   const [editing, setEditing] = useState(false);
   const [joining, setJoining] = useState(false);
+  const [referring, setReferring] = useState(false);
   const { wards } = useWards(profile?.hospitalId ?? DEFAULT_HOSPITAL.id);
 
   if (!backend || !authReady || (user && (profile === undefined || !adminChecked))) {
@@ -493,10 +551,19 @@ export function DoctorPage({ go }: { go: (r: Route) => void }) {
       <PageTitle title={profile.name} subtitle={`${hospital.shortBn} · ${ward?.nameBn ?? '…'}`} />
       <div className="space-y-4">
         <DutyCard key={isOnDuty(profile.dutyUntil, now) ? 'on' : 'off'} profile={profile} wardFull={ward?.status === 'full'} />
+        <NotifyPrompt />
+        <IncomingList />
         <MyWardCard profile={profile} />
-        <button type="button" className="btn btn-soft w-full" onClick={() => go('ward')}>
-          <Search size={20} /> রেফারের আগে অন্য ওয়ার্ডে সিট দেখুন
-        </button>
+        <div className="space-y-2">
+          <button type="button" className="btn btn-primary min-h-15 w-full text-[18px]" onClick={() => setReferring(true)}>
+            <ArrowRightLeft size={21} /> রোগী রেফার করুন
+          </button>
+          <button type="button" className="btn btn-ghost w-full" onClick={() => go('ward')}>
+            <Search size={19} /> সব ওয়ার্ডের অবস্থা দেখুন
+          </button>
+        </div>
+        <SentList />
+        <ReferSheet open={referring} onClose={() => setReferring(false)} />
         {isAdmin && (
           <div className="pt-4">
             <AdminPanel />

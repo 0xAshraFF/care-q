@@ -25,21 +25,13 @@ function ContactRow({ c }: { c: Contact }) {
 
 export function ContactList({ contacts, tip }: { contacts: Contact[]; tip?: string }) {
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       <ul className="card divide-y divide-line overflow-hidden p-0">
-        {contacts.map((c) => (
+        {[...contacts, ...NATIONAL].map((c) => (
           <ContactRow key={c.phone} c={c} />
         ))}
       </ul>
       {tip && <p className="px-1 text-[15px] text-ink-500">{tip}</p>}
-      <div>
-        <h2 className="mb-2 px-1 text-[15px] font-medium text-ink-500">জাতীয় নম্বর</h2>
-        <ul className="card divide-y divide-line overflow-hidden p-0">
-          {NATIONAL.map((c) => (
-            <ContactRow key={c.phone} c={c} />
-          ))}
-        </ul>
-      </div>
     </div>
   );
 }

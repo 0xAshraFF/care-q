@@ -11,9 +11,12 @@ import {
   doc,
   getDoc,
   getDocs,
+  query,
   serverTimestamp,
   setDoc,
   updateDoc,
+  where,
+  writeBatch,
 } from 'firebase/firestore';
 import { readFileSync } from 'node:fs';
 import { afterAll, beforeAll, beforeEach, describe, it } from 'vitest';
@@ -45,11 +48,13 @@ const stored = (wardId: string, extra: Record<string, unknown> = {}) => ({
 const db = (uid?: string) => (uid ? env.authenticatedContext(uid) : env.unauthenticatedContext()).firestore();
 const adminDb = () => env.authenticatedContext('boss', { email: ADMIN_EMAIL, email_verified: true }).firestore();
 
-const status = (uid: string, full: boolean) => ({
+const status = (uid: string, full: boolean, extra: Record<string, unknown> = {}) => ({
   hospitalId: 'dmch',
-  full,
+  status: full ? 'full' : 'open',
+  freeBeds: null,
   updatedAt: serverTimestamp(),
   updatedByUid: uid,
+  ...extra,
 });
 
 beforeAll(async () => {
@@ -95,6 +100,16 @@ describe('wards', () => {
 
   it('a pending doctor cannot set status, even for their own ward', async () => {
     await assertFails(setDoc(doc(db('pete'), 'wards/dmch-surgery'), status('pete', true)));
+  });
+
+  it('accepts the three states and an optional bed count, but no beds on a full ward', async () => {
+    const ref = doc(db('alice'), 'wards/dmch-medicine');
+    await assertSucceeds(setDoc(ref, status('alice', false, { status: 'emergency', freeBeds: 2 })));
+    await assertSucceeds(setDoc(ref, status('alice', false, { freeBeds: 11 })));
+    await assertFails(setDoc(ref, status('alice', false, { status: 'closed' })));
+    await assertFails(setDoc(ref, status('alice', false, { freeBeds: 0 })));
+    await assertFails(setDoc(ref, status('alice', false, { freeBeds: 99 })));
+    await assertFails(setDoc(ref, status('alice', true, { freeBeds: 3 })));
   });
 
   it('status writes must carry the server time and the writer uid', async () => {
@@ -231,5 +246,107 @@ describe('doctors: admin', () => {
 
   it('a non-admin cannot approve', async () => {
     await assertFails(updateDoc(doc(db('alice'), 'doctors/pete'), { approved: true }));
+  });
+});
+
+describe('transfers', () => {
+  // alice: approved, medicine. carol: approved, cardiology. dave: approved, surgery. pete: pending, surgery.
+  beforeEach(async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      const f = ctx.firestore();
+      await setDoc(doc(f, 'doctors/carol'), stored('dmch-cardiology', { approved: true, name: 'ডা. ক্যারল', phone: '01811111111' }));
+      await setDoc(doc(f, 'doctors/dave'), stored('dmch-surgery', { approved: true, name: 'ডা. ডেভ', phone: '01911111111' }));
+      await setDoc(doc(f, 'transfers/t1'), {
+        ...referral(),
+        createdAt: Timestamp.now(),
+      });
+    });
+  });
+
+  const referral = (extra: Record<string, unknown> = {}) => ({
+    hospitalId: 'dmch',
+    fromWardId: 'dmch-medicine',
+    toWardId: 'dmch-cardiology',
+    fromDoctorUid: 'alice',
+    fromDoctorName: 'ডা. রহিম',
+    fromDoctorPhone: '01712345678',
+    patientNote: 'বুকে ব্যথা',
+    patientInfo: '৫৮ বছর',
+    status: 'pending',
+    createdAt: serverTimestamp(),
+    ...extra,
+  });
+
+  const answer = (uid: string, name: string, phone: string, accept = true) => ({
+    status: accept ? 'accepted' : 'rejected',
+    respondedAt: serverTimestamp(),
+    respondedByUid: uid,
+    respondedByName: name,
+    respondedByPhone: phone,
+  });
+
+  it('an approved doctor sends a referral from their own ward, under their own name', async () => {
+    await assertSucceeds(setDoc(doc(db('alice'), 'transfers/new'), referral()));
+    await assertFails(setDoc(doc(db('alice'), 'transfers/x1'), referral({ fromWardId: 'dmch-icu' })));
+    await assertFails(setDoc(doc(db('alice'), 'transfers/x2'), referral({ fromDoctorName: 'অন্য কেউ' })));
+    await assertFails(setDoc(doc(db('alice'), 'transfers/x3'), referral({ toWardId: 'dmch-medicine' })));
+    await assertFails(setDoc(doc(db('alice'), 'transfers/x4'), referral({ status: 'accepted' })));
+    await assertFails(setDoc(doc(db('alice'), 'transfers/x5'), referral({ patientNote: '' })));
+  });
+
+  it('pending doctors and patients cannot send or read referrals', async () => {
+    await assertFails(
+      setDoc(doc(db('pete'), 'transfers/x'), referral({ fromDoctorUid: 'pete', fromWardId: 'dmch-surgery' })),
+    );
+    await assertFails(getDoc(doc(db(), 'transfers/t1')));
+    await assertFails(getDoc(doc(db('pete'), 'transfers/t1')));
+  });
+
+  it('the sender and the receiving ward can read it; other wards cannot', async () => {
+    await assertSucceeds(getDocs(query(collection(db('alice'), 'transfers'), where('fromDoctorUid', '==', 'alice'))));
+    await assertSucceeds(
+      getDocs(
+        query(
+          collection(db('carol'), 'transfers'),
+          where('toWardId', '==', 'dmch-cardiology'),
+          where('status', '==', 'pending'),
+        ),
+      ),
+    );
+    await assertFails(getDoc(doc(db('dave'), 'transfers/t1')));
+    await assertFails(getDocs(query(collection(db('dave'), 'transfers'), where('toWardId', '==', 'dmch-cardiology'))));
+    await assertFails(getDocs(collection(db('alice'), 'transfers')));
+  });
+
+  it('only the receiving ward answers, as themselves, once', async () => {
+    await assertFails(updateDoc(doc(db('dave'), 'transfers/t1'), answer('dave', 'ডা. ডেভ', '01911111111')));
+    await assertFails(updateDoc(doc(db('carol'), 'transfers/t1'), answer('carol', 'অন্য নাম', '01811111111')));
+    await assertSucceeds(updateDoc(doc(db('carol'), 'transfers/t1'), answer('carol', 'ডা. ক্যারল', '01811111111')));
+    // Already answered.
+    await assertFails(
+      updateDoc(doc(db('carol'), 'transfers/t1'), answer('carol', 'ডা. ক্যারল', '01811111111', false)),
+    );
+  });
+
+  it('accepting can lower the bed count in the same batch', async () => {
+    const f = db('carol');
+    const batch = writeBatch(f);
+    batch.update(doc(f, 'transfers/t1'), answer('carol', 'ডা. ক্যারল', '01811111111'));
+    batch.set(doc(f, 'wards/dmch-cardiology'), status('carol', false, { freeBeds: 2 }), { merge: true });
+    await assertSucceeds(batch.commit());
+  });
+
+  it('the sender can cancel; the receiver cannot cancel', async () => {
+    await assertFails(
+      updateDoc(doc(db('carol'), 'transfers/t1'), { status: 'cancelled', respondedAt: serverTimestamp() }),
+    );
+    await assertSucceeds(
+      updateDoc(doc(db('alice'), 'transfers/t1'), { status: 'cancelled', respondedAt: serverTimestamp() }),
+    );
+  });
+
+  it('nobody deletes referrals', async () => {
+    await assertFails(deleteDoc(doc(db('alice'), 'transfers/t1')));
+    await assertFails(deleteDoc(doc(adminDb(), 'transfers/t1')));
   });
 });

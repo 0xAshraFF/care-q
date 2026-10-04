@@ -33,16 +33,45 @@ export interface AdminPatch {
   dutyUntil?: null;
 }
 
+/** What a ward doctor reports. */
+export type WardState = 'open' | 'emergency' | 'full';
+
 /** A doc in /wards. Built-in wards only have status fields; doctor-added wards also carry a name. */
 export interface WardDoc {
   id: string;
   hospitalId: string;
   nameBn?: string;
   custom?: boolean;
-  full?: boolean;
+  status?: WardState;
+  /** Optional free-bed count; null when the doctor didn't give one. 11 means "more than 10". */
+  freeBeds?: number | null;
   updatedAt?: number;
   updatedByUid?: string;
 }
+
+export type TransferStatus = 'pending' | 'accepted' | 'rejected' | 'cancelled';
+
+/** A referral from one ward's doctor to another ward. */
+export interface Transfer {
+  id: string;
+  hospitalId: string;
+  fromWardId: string;
+  toWardId: string;
+  fromDoctorUid: string;
+  fromDoctorName: string;
+  fromDoctorPhone: string;
+  /** Problem / why the patient needs that ward. */
+  patientNote: string;
+  /** Optional age and sex, free text. */
+  patientInfo: string;
+  status: TransferStatus;
+  createdAt: number;
+  respondedAt?: number;
+  respondedByName?: string;
+  respondedByPhone?: string;
+}
+
+export type TransferInput = Pick<Transfer, 'toWardId' | 'patientNote' | 'patientInfo'>;
 
 export interface Backend {
   mode: 'firebase' | 'demo';
@@ -57,12 +86,30 @@ export interface Backend {
   setDuty(uid: string, dutyUntil: number | null): Promise<void>;
 
   watchWards(hospitalId: string, cb: (docs: WardDoc[]) => void, onError: (e: Error) => void): Unsub;
-  setWardFull(uid: string, hospitalId: string, wardId: string, full: boolean): Promise<void>;
+  setWardStatus(uid: string, hospitalId: string, wardId: string, status: WardState, freeBeds: number | null): Promise<void>;
   /** Approved doctors and admins only. */
   addWard(uid: string, hospitalId: string, nameBn: string): Promise<string>;
 
   /** Approved doctors on shift. Requires an approved doctor. */
   watchOnDutyDoctors(cb: (docs: DoctorProfile[]) => void, onError: (e: Error) => void): Unsub;
+
+  /** Sends a referral from the doctor's own ward. */
+  createTransfer(doctor: DoctorProfile, input: TransferInput): Promise<void>;
+  /** Pending referrals to this ward. */
+  watchIncomingTransfers(wardId: string, cb: (t: Transfer[]) => void, onError: (e: Error) => void): Unsub;
+  /** Referrals this doctor sent. */
+  watchSentTransfers(uid: string, cb: (t: Transfer[]) => void, onError: (e: Error) => void): Unsub;
+  /**
+   * Accept or decline a referral to the doctor's ward. On accept, `wardUpdate` (if given) is written
+   * in the same batch, e.g. one fewer free bed.
+   */
+  respondTransfer(
+    doctor: DoctorProfile,
+    transferId: string,
+    accept: boolean,
+    wardUpdate?: { status: WardState; freeBeds: number | null },
+  ): Promise<void>;
+  cancelTransfer(uid: string, transferId: string): Promise<void>;
 
   /** True when the signed-in user's Gmail is listed in config/admins. */
   isAdmin(): Promise<boolean>;

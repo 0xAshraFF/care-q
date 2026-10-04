@@ -40,13 +40,18 @@ describe('oxygen post', () => {
 describe('mergeWards', () => {
   it('overlays status on built-in wards and adds doctor-created ones', () => {
     const wards = mergeWards('dmch', [
-      { id: 'dmch-icu', hospitalId: 'dmch', full: true, updatedAt: 1 },
-      { id: 'x1', hospitalId: 'dmch', custom: true, nameBn: 'মেডিসিন ইউনিট ৩', full: false, updatedAt: 2 },
-      { id: 'stray', hospitalId: 'dmch', full: false },
+      { id: 'dmch-icu', hospitalId: 'dmch', status: 'full', freeBeds: 3, updatedAt: 1 },
+      { id: 'dmch-ccu', hospitalId: 'dmch', status: 'emergency', freeBeds: 2, updatedAt: 1 },
+      { id: 'x1', hospitalId: 'dmch', custom: true, nameBn: 'মেডিসিন ইউনিট ৩', status: 'open', updatedAt: 2 },
+      { id: 'stray', hospitalId: 'dmch', status: 'open' },
     ]);
-    expect(wards.find((w) => w.id === 'dmch-icu')?.status).toBe('full');
-    expect(wards.find((w) => w.id === 'dmch-surgery')?.status).toBe('unknown');
-    expect(wards.find((w) => w.id === 'x1')?.status).toBe('open');
-    expect(wards.find((w) => w.id === 'stray')).toBeUndefined();
+    const by = (id: string) => wards.find((w) => w.id === id);
+    expect(by('dmch-icu')?.status).toBe('full');
+    // A full ward never shows free beds, even if an old count is stored.
+    expect(by('dmch-icu')?.freeBeds).toBeNull();
+    expect(by('dmch-ccu')).toMatchObject({ status: 'emergency', freeBeds: 2 });
+    expect(by('dmch-surgery')?.status).toBe('unknown');
+    expect(by('x1')).toMatchObject({ status: 'open', freeBeds: null });
+    expect(by('stray')).toBeUndefined();
   });
 });

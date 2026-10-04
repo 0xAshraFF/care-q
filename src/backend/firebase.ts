@@ -23,9 +23,10 @@ import {
   setDoc,
   updateDoc,
   where,
+  writeBatch,
   type DocumentData,
 } from 'firebase/firestore';
-import type { Backend, DoctorProfile, WardDoc } from './types';
+import type { Backend, DoctorProfile, Transfer, WardDoc, WardState } from './types';
 
 export interface FirebaseConfig {
   apiKey: string;
@@ -55,6 +56,28 @@ function toProfile(uid: string, d: DocumentData): DoctorProfile {
 }
 
 const ts = (ms: number | null) => (ms === null ? null : Timestamp.fromMillis(ms));
+
+const WARD_STATES: WardState[] = ['open', 'emergency', 'full'];
+
+function toTransfer(id: string, d: DocumentData): Transfer {
+  return {
+    id,
+    hospitalId: d.hospitalId,
+    fromWardId: d.fromWardId,
+    toWardId: d.toWardId,
+    fromDoctorUid: d.fromDoctorUid,
+    fromDoctorName: d.fromDoctorName,
+    fromDoctorPhone: d.fromDoctorPhone,
+    patientNote: d.patientNote,
+    patientInfo: d.patientInfo ?? '',
+    status: d.status,
+    // Pending server timestamps read as null locally; treat as "just now".
+    createdAt: millis(d.createdAt) ?? Date.now(),
+    respondedAt: millis(d.respondedAt),
+    respondedByName: d.respondedByName,
+    respondedByPhone: d.respondedByPhone,
+  };
+}
 
 export function createFirebaseBackend(config: FirebaseConfig): Backend {
   const app = initializeApp(config);
@@ -123,7 +146,8 @@ export function createFirebaseBackend(config: FirebaseConfig): Backend {
                 hospitalId: d.hospitalId,
                 nameBn: d.nameBn,
                 custom: d.custom === true,
-                full: typeof d.full === 'boolean' ? d.full : undefined,
+                status: WARD_STATES.includes(d.status) ? d.status : undefined,
+                freeBeds: typeof d.freeBeds === 'number' ? d.freeBeds : null,
                 // Pending server timestamps read as null locally; treat as "just now".
                 updatedAt: 'updatedAt' in d ? (millis(d.updatedAt) ?? Date.now()) : undefined,
                 updatedByUid: d.updatedByUid,
@@ -134,11 +158,11 @@ export function createFirebaseBackend(config: FirebaseConfig): Backend {
       );
     },
 
-    async setWardFull(uid, hospitalId, wardId, full) {
+    async setWardStatus(uid, hospitalId, wardId, status, freeBeds) {
       // merge: creates the doc for built-in wards, keeps nameBn on doctor-added wards.
       await setDoc(
         doc(db, 'wards', wardId),
-        { hospitalId, full, updatedAt: serverTimestamp(), updatedByUid: uid },
+        { hospitalId, status, freeBeds, updatedAt: serverTimestamp(), updatedByUid: uid },
         { merge: true },
       );
     },
@@ -162,6 +186,61 @@ export function createFirebaseBackend(config: FirebaseConfig): Backend {
         (snap) => cb(snap.docs.map((s) => toProfile(s.id, s.data())).filter((d) => d.approved)),
         onError,
       );
+    },
+
+    async createTransfer(doctor, input) {
+      await addDoc(collection(db, 'transfers'), {
+        hospitalId: doctor.hospitalId,
+        fromWardId: doctor.wardId,
+        toWardId: input.toWardId,
+        fromDoctorUid: doctor.uid,
+        fromDoctorName: doctor.name,
+        fromDoctorPhone: doctor.phone,
+        patientNote: input.patientNote,
+        patientInfo: input.patientInfo,
+        status: 'pending',
+        createdAt: serverTimestamp(),
+      });
+    },
+
+    watchIncomingTransfers(wardId, cb, onError) {
+      // Equality filters only, so no composite index is needed; callers sort and drop old ones.
+      return onSnapshot(
+        query(collection(db, 'transfers'), where('toWardId', '==', wardId), where('status', '==', 'pending')),
+        (snap) => cb(snap.docs.map((s) => toTransfer(s.id, s.data()))),
+        onError,
+      );
+    },
+
+    watchSentTransfers(uid, cb, onError) {
+      return onSnapshot(
+        query(collection(db, 'transfers'), where('fromDoctorUid', '==', uid)),
+        (snap) => cb(snap.docs.map((s) => toTransfer(s.id, s.data()))),
+        onError,
+      );
+    },
+
+    async respondTransfer(doctor, transferId, accept, wardUpdate) {
+      const batch = writeBatch(db);
+      batch.update(doc(db, 'transfers', transferId), {
+        status: accept ? 'accepted' : 'rejected',
+        respondedAt: serverTimestamp(),
+        respondedByUid: doctor.uid,
+        respondedByName: doctor.name,
+        respondedByPhone: doctor.phone,
+      });
+      if (accept && wardUpdate) {
+        batch.set(
+          doc(db, 'wards', doctor.wardId),
+          { hospitalId: doctor.hospitalId, ...wardUpdate, updatedAt: serverTimestamp(), updatedByUid: doctor.uid },
+          { merge: true },
+        );
+      }
+      await batch.commit();
+    },
+
+    async cancelTransfer(_uid, transferId) {
+      await updateDoc(doc(db, 'transfers', transferId), { status: 'cancelled', respondedAt: serverTimestamp() });
     },
 
     async isAdmin() {
