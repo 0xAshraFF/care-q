@@ -1,0 +1,87 @@
+rules_version = '2';
+
+// /wards/{wardId}    public read. Built-in wards (src/data/hospitals.ts) only store status here;
+//                    doctor-added wards also store nameBn + custom: true.
+// /doctors/{uid}     a doctor's own profile. Only registered doctors can read others (phone numbers).
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function doctorPath() {
+      return /databases/$(database)/documents/doctors/$(request.auth.uid);
+    }
+
+    function isDoctor() {
+      return signedIn() && exists(doctorPath());
+    }
+
+    function isWardDoctor(wardId) {
+      return isDoctor() && get(doctorPath()).data.wardId == wardId;
+    }
+
+    function validStatusWrite() {
+      let d = request.resource.data;
+      return d.full is bool
+        && d.updatedAt == request.time
+        && d.updatedByUid == request.auth.uid;
+    }
+
+    match /wards/{wardId} {
+      allow read: if true;
+
+      allow create: if
+        // A doctor adds their unit when it isn't in the built-in list (before their profile exists).
+        (signedIn()
+          && request.resource.data.keys().hasOnly(['hospitalId', 'nameBn', 'custom', 'createdByUid', 'createdAt'])
+          && request.resource.data.custom == true
+          && request.resource.data.hospitalId is string
+          && request.resource.data.hospitalId.size() <= 40
+          && request.resource.data.nameBn is string
+          && request.resource.data.nameBn.size() >= 2
+          && request.resource.data.nameBn.size() <= 60
+          && request.resource.data.createdByUid == request.auth.uid
+          && request.resource.data.createdAt == request.time)
+        ||
+        // First status report for a built-in ward.
+        (isWardDoctor(wardId)
+          && request.resource.data.keys().hasOnly(['hospitalId', 'full', 'updatedAt', 'updatedByUid'])
+          && request.resource.data.hospitalId == get(doctorPath()).data.hospitalId
+          && validStatusWrite());
+
+      // Only doctors of this ward can change its status, and nothing else about it.
+      allow update: if isWardDoctor(wardId)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['full', 'updatedAt', 'updatedByUid'])
+        && validStatusWrite();
+
+      allow delete: if false;
+    }
+
+    match /doctors/{uid} {
+      allow get: if signedIn() && (request.auth.uid == uid || isDoctor());
+      allow list: if isDoctor();
+
+      allow create, update: if signedIn() && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['name', 'phone', 'hospitalId', 'wardId', 'dutyUntil', 'updatedAt'])
+        && request.resource.data.name is string
+        && request.resource.data.name.size() >= 2
+        && request.resource.data.name.size() <= 60
+        && request.resource.data.phone is string
+        && request.resource.data.phone.matches('^01[3-9][0-9]{8}$')
+        && request.resource.data.hospitalId is string
+        && request.resource.data.hospitalId.size() <= 40
+        && request.resource.data.wardId is string
+        && request.resource.data.wardId.size() >= 1
+        && request.resource.data.wardId.size() <= 100
+        && (request.resource.data.dutyUntil == null
+            || (request.resource.data.dutyUntil is timestamp
+                && request.resource.data.dutyUntil <= request.time + duration.value(25, 'h')))
+        && request.resource.data.updatedAt == request.time;
+
+      allow delete: if signedIn() && request.auth.uid == uid;
+    }
+  }
+}
