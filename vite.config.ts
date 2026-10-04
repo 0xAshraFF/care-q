@@ -9,6 +9,8 @@ export default defineConfig({
     react(),
     tailwindcss(),
     VitePWA({
+      // CAREQ_NO_PWA=1 builds without the service worker, for hosts that don't allow one.
+      disable: process.env.CAREQ_NO_PWA === '1',
       registerType: 'autoUpdate',
       includeAssets: ['favicon.svg', 'apple-touch-icon.png'],
       manifest: {

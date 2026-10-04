@@ -13,6 +13,7 @@ function wardLabel(d: DoctorProfile, wards: WardView[]): string {
 function PendingDoctor({ d, wards }: { d: DoctorProfile; wards: WardView[] }) {
   const { backend, user, toast } = useApp();
   const [busy, setBusy] = useState(false);
+  const [confirming, setConfirming] = useState(false);
 
   const approve = async () => {
     if (!backend || !user) return;
@@ -33,7 +34,7 @@ function PendingDoctor({ d, wards }: { d: DoctorProfile; wards: WardView[] }) {
   };
 
   const reject = async () => {
-    if (!backend || !window.confirm(`${d.name}-এর আবেদন বাতিল করবেন?`)) return;
+    if (!backend) return;
     setBusy(true);
     try {
       await backend.deleteDoctor(d.uid);
@@ -57,40 +58,83 @@ function PendingDoctor({ d, wards }: { d: DoctorProfile; wards: WardView[] }) {
       <a href={telHref(d.phone)} className="btn btn-soft w-full">
         <Phone size={19} /> ফোন করে যাচাই <span className="font-normal text-ink-500">{formatPhone(d.phone)}</span>
       </a>
-      <div className="grid grid-cols-2 gap-2">
-        <button
-          type="button"
-          disabled={busy}
-          onClick={() => void reject()}
-          className="btn border border-bad-100 bg-white text-bad-700 active:bg-bad-50"
-        >
-          বাতিল
-        </button>
-        <button type="button" disabled={busy} onClick={() => void approve()} className="btn btn-primary">
-          অনুমোদন দিন
-        </button>
-      </div>
+      {confirming ? (
+        <div className="space-y-2 rounded-xl bg-bad-50 p-3">
+          <p className="text-[15px] font-medium text-bad-700">{d.name}-এর আবেদন বাতিল করবেন?</p>
+          <div className="grid grid-cols-2 gap-2">
+            <button type="button" disabled={busy} onClick={() => setConfirming(false)} className="btn btn-soft bg-white">
+              না
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void reject()}
+              className="btn bg-bad-600 text-white active:bg-bad-700"
+            >
+              হ্যাঁ, বাতিল
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => setConfirming(true)}
+            className="btn border border-bad-100 bg-white text-bad-700 active:bg-bad-50"
+          >
+            বাতিল
+          </button>
+          <button type="button" disabled={busy} onClick={() => void approve()} className="btn btn-primary">
+            অনুমোদন দিন
+          </button>
+        </div>
+      )}
     </li>
   );
 }
 
 function ApprovedDoctor({ d, wards }: { d: DoctorProfile; wards: WardView[] }) {
   const { backend, toast } = useApp();
+  const [confirming, setConfirming] = useState(false);
   const revoke = () => {
-    if (!backend || !window.confirm(`${d.name}-এর অনুমোদন তুলে নেবেন? উনি আর ওয়ার্ডের অবস্থা বদলাতে বা নম্বর দেখতে পারবেন না।`)) return;
-    backend.adminUpdateDoctor(d.uid, { approved: false, dutyUntil: null }).catch(() => toast('হয়নি। আবার চেষ্টা করুন।'));
+    setConfirming(false);
+    backend?.adminUpdateDoctor(d.uid, { approved: false, dutyUntil: null }).catch(() => toast('হয়নি। আবার চেষ্টা করুন।'));
   };
   return (
-    <li className="flex items-center gap-3 px-4 py-3">
-      <div className="min-w-0 flex-1">
-        <p className="font-semibold">{d.name}</p>
-        <p className="text-[14px] text-ink-500">
-          {wardLabel(d, wards)} · বিএমডিসি {d.bmdc} · {formatPhone(d.phone)}
-        </p>
+    <li className="space-y-2 px-4 py-3">
+      <div className="flex items-center gap-3">
+        <div className="min-w-0 flex-1">
+          <p className="font-semibold">{d.name}</p>
+          <p className="text-[14px] text-ink-500">
+            {wardLabel(d, wards)} · বিএমডিসি {d.bmdc} · {formatPhone(d.phone)}
+          </p>
+        </div>
+        {!confirming && (
+          <button
+            type="button"
+            onClick={() => setConfirming(true)}
+            className="shrink-0 rounded-lg px-2 py-2 text-[14px] font-medium text-bad-700 active:bg-bad-50"
+          >
+            তুলে নিন
+          </button>
+        )}
       </div>
-      <button type="button" onClick={revoke} className="shrink-0 rounded-lg px-2 py-2 text-[14px] font-medium text-bad-700 active:bg-bad-50">
-        তুলে নিন
-      </button>
+      {confirming && (
+        <div className="space-y-2 rounded-xl bg-bad-50 p-3">
+          <p className="text-[15px] text-bad-700">
+            অনুমোদন তুলে নিলে উনি আর ওয়ার্ডের অবস্থা বদলাতে বা নম্বর দেখতে পারবেন না।
+          </p>
+          <div className="grid grid-cols-2 gap-2">
+            <button type="button" onClick={() => setConfirming(false)} className="btn btn-soft bg-white">
+              না
+            </button>
+            <button type="button" onClick={revoke} className="btn bg-bad-600 text-white active:bg-bad-700">
+              তুলে নিন
+            </button>
+          </div>
+        </div>
+      )}
     </li>
   );
 }

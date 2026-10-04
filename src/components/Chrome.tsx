@@ -55,7 +55,10 @@ export function Logo({ size = 36 }: { size?: number }) {
 
 export function Header() {
   return (
-    <header className="sticky top-0 z-20 border-b border-line bg-white/95 backdrop-blur">
+    <header
+      className="sticky z-20 border-b border-line bg-white/95 backdrop-blur"
+      style={{ top: 'env(safe-area-inset-top, 0px)' }}
+    >
       <div className="mx-auto flex max-w-xl items-center gap-3 px-4 py-2.5">
         <Logo />
         <div className="min-w-0 flex-1">

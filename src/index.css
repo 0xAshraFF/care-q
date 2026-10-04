@@ -33,16 +33,24 @@
   --color-warn-700: #85570c;
 }
 
+/* Outside any layer on purpose: unlayered CSS beats layered CSS, so a page that embeds the app
+   with its own body reset can't replace our background and font. */
+html {
+  -webkit-tap-highlight-color: transparent;
+  text-size-adjust: 100%;
+}
+body {
+  margin: 0;
+  background: var(--color-page);
+  color: var(--color-ink-900);
+  font-family: var(--font-sans);
+  font-size: 17px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
 @layer base {
-  html {
-    -webkit-tap-highlight-color: transparent;
-    text-size-adjust: 100%;
-  }
-  body {
-    @apply bg-page text-ink-900 font-sans antialiased;
-    font-size: 17px;
-    line-height: 1.5;
-  }
   button,
   a,
   select,

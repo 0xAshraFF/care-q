@@ -5,7 +5,7 @@
 import { load, save } from '../lib/storage';
 import type { AuthUser, Backend, DoctorProfile, WardDoc } from './types';
 
-const KEY = 'careq-demo-v2';
+const KEY = 'careq-demo-v3';
 const DEMO_UID = 'demo-doctor';
 
 interface DemoState {
@@ -24,6 +24,7 @@ function seed(): DemoState {
     updatedAt: now - agoMin * min,
     updatedByUid: 'demo-a',
   });
+  // 010… isn't an assigned Bangladeshi prefix, so tapping a demo number can't ring a real person.
   const doctor = (uid: string, name: string, phone: string, wardId: string, approved = true): DoctorProfile => ({
     uid,
     name,
@@ -38,10 +39,10 @@ function seed(): DemoState {
   return {
     signedIn: false,
     doctors: {
-      'demo-a': doctor('demo-a', 'ডা. নুসরাত জাহান (ডেমো)', '01700000001', 'dmch-cardiology'),
-      'demo-b': doctor('demo-b', 'ডা. তানভীর হাসান (ডেমো)', '01700000002', 'dmch-neurology'),
-      'demo-c': doctor('demo-c', 'ডা. সাবরিনা ইসলাম (ডেমো)', '01700000003', 'dmch-medicine'),
-      'demo-d': doctor('demo-d', 'ডা. মাহমুদ রেজা (ডেমো)', '01700000004', 'dmch-surgery', false),
+      'demo-a': doctor('demo-a', 'ডা. নুসরাত জাহান (ডেমো)', '01000000001', 'dmch-cardiology'),
+      'demo-b': doctor('demo-b', 'ডা. তানভীর হাসান (ডেমো)', '01000000002', 'dmch-neurology'),
+      'demo-c': doctor('demo-c', 'ডা. সাবরিনা ইসলাম (ডেমো)', '01000000003', 'dmch-medicine'),
+      'demo-d': doctor('demo-d', 'ডা. মাহমুদ রেজা (ডেমো)', '01000000004', 'dmch-surgery', false),
     },
     wards: Object.fromEntries(
       [

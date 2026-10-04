@@ -29,7 +29,7 @@ export function useHashRoute(): [Route, (r: Route) => void] {
     window.addEventListener('hashchange', onChange);
     return () => window.removeEventListener('hashchange', onChange);
   }, []);
-  return [route, (r) => (window.location.hash = `/${r}`)];
+  return [route, (r) => (window.location.hash = r)];
 }
 
 /** useState that remembers its value on this device. */
