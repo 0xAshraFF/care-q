@@ -11,7 +11,9 @@ import {
   Timestamp,
   addDoc,
   collection,
+  deleteDoc,
   doc,
+  getDoc,
   initializeFirestore,
   onSnapshot,
   persistentLocalCache,
@@ -43,11 +45,16 @@ function toProfile(uid: string, d: DocumentData): DoctorProfile {
     uid,
     name: d.name,
     phone: d.phone,
+    bmdc: d.bmdc ?? '',
     hospitalId: d.hospitalId,
-    wardId: d.wardId,
+    wardId: d.wardId ?? '',
+    newWardName: d.newWardName ?? '',
+    approved: d.approved === true,
     dutyUntil: millis(d.dutyUntil) ?? null,
   };
 }
+
+const ts = (ms: number | null) => (ms === null ? null : Timestamp.fromMillis(ms));
 
 export function createFirebaseBackend(config: FirebaseConfig): Backend {
   const app = initializeApp(config);
@@ -91,19 +98,17 @@ export function createFirebaseBackend(config: FirebaseConfig): Backend {
       );
     },
 
-    async saveProfile(uid, input, dutyUntil) {
+    async saveProfile(uid, input, approved, dutyUntil) {
       await setDoc(doc(db, 'doctors', uid), {
         ...input,
-        dutyUntil: dutyUntil === null ? null : Timestamp.fromMillis(dutyUntil),
+        approved,
+        dutyUntil: ts(dutyUntil),
         updatedAt: serverTimestamp(),
       });
     },
 
     async setDuty(uid, dutyUntil) {
-      await updateDoc(doc(db, 'doctors', uid), {
-        dutyUntil: dutyUntil === null ? null : Timestamp.fromMillis(dutyUntil),
-        updatedAt: serverTimestamp(),
-      });
+      await updateDoc(doc(db, 'doctors', uid), { dutyUntil: ts(dutyUntil), updatedAt: serverTimestamp() });
     },
 
     watchWards(hospitalId, cb, onError) {
@@ -154,9 +159,34 @@ export function createFirebaseBackend(config: FirebaseConfig): Backend {
       // since a listener doesn't drop docs whose shift ended after it started.
       return onSnapshot(
         query(collection(db, 'doctors'), where('dutyUntil', '>', Timestamp.now())),
+        (snap) => cb(snap.docs.map((s) => toProfile(s.id, s.data())).filter((d) => d.approved)),
+        onError,
+      );
+    },
+
+    async isAdmin() {
+      // The rules only let admins read this doc, so a successful read is the answer.
+      try {
+        return (await getDoc(doc(db, 'config', 'admins'))).exists();
+      } catch {
+        return false;
+      }
+    },
+
+    watchAllDoctors(cb, onError) {
+      return onSnapshot(
+        collection(db, 'doctors'),
         (snap) => cb(snap.docs.map((s) => toProfile(s.id, s.data()))),
         onError,
       );
+    },
+
+    async adminUpdateDoctor(uid, patch) {
+      await updateDoc(doc(db, 'doctors', uid), { ...patch });
+    },
+
+    async deleteDoctor(uid) {
+      await deleteDoc(doc(db, 'doctors', uid));
     },
   };
 }

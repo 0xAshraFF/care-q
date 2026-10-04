@@ -1,8 +1,11 @@
 rules_version = '2';
 
-// /wards/{wardId}    public read. Built-in wards (src/data/hospitals.ts) only store status here;
-//                    doctor-added wards also store nameBn + custom: true.
-// /doctors/{uid}     a doctor's own profile. Only registered doctors can read others (phone numbers).
+// /wards/{wardId}     public read. Built-in wards (src/data/hospitals.ts) only store status here;
+//                     doctor-added wards also store nameBn + custom: true.
+// /doctors/{uid}      a doctor's profile. `approved` is set only by an admin; until then the
+//                     doctor sees what patients see.
+// /config/admins      { emails: [...] } — Gmail addresses allowed to approve doctors.
+//                     Create it by hand in the Firebase console. Clients can't write it.
 
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -15,12 +18,19 @@ service cloud.firestore {
       return /databases/$(database)/documents/doctors/$(request.auth.uid);
     }
 
+    // Registered AND approved by an admin.
     function isDoctor() {
-      return signedIn() && exists(doctorPath());
+      return signedIn() && exists(doctorPath()) && get(doctorPath()).data.approved == true;
     }
 
     function isWardDoctor(wardId) {
       return isDoctor() && get(doctorPath()).data.wardId == wardId;
+    }
+
+    function isAdmin() {
+      return signedIn()
+        && request.auth.token.email_verified == true
+        && request.auth.token.email in get(/databases/$(database)/documents/config/admins).data.emails;
     }
 
     function validStatusWrite() {
@@ -30,12 +40,19 @@ service cloud.firestore {
         && d.updatedByUid == request.auth.uid;
     }
 
+    match /config/admins {
+      // Readable only by the admins it lists, which doubles as the client's "am I an admin?" check.
+      allow get: if signedIn()
+        && request.auth.token.email_verified == true
+        && request.auth.token.email in resource.data.emails;
+    }
+
     match /wards/{wardId} {
       allow read: if true;
 
       allow create: if
-        // A doctor adds their unit when it isn't in the built-in list (before their profile exists).
-        (signedIn()
+        // A ward missing from the built-in list. Pending doctors ask for one; the admin creates it.
+        ((isDoctor() || isAdmin())
           && request.resource.data.keys().hasOnly(['hospitalId', 'nameBn', 'custom', 'createdByUid', 'createdAt'])
           && request.resource.data.custom == true
           && request.resource.data.hospitalId is string
@@ -52,36 +69,58 @@ service cloud.firestore {
           && request.resource.data.hospitalId == get(doctorPath()).data.hospitalId
           && validStatusWrite());
 
-      // Only doctors of this ward can change its status, and nothing else about it.
+      // Only approved doctors of this ward can change its status, and nothing else about it.
       allow update: if isWardDoctor(wardId)
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['full', 'updatedAt', 'updatedByUid'])
         && validStatusWrite();
 
-      allow delete: if false;
+      // Admins can remove a doctor-added ward (e.g. a duplicate).
+      allow delete: if isAdmin() && resource.data.custom == true;
     }
 
     match /doctors/{uid} {
-      allow get: if signedIn() && (request.auth.uid == uid || isDoctor());
-      allow list: if isDoctor();
+      function validProfile() {
+        let d = request.resource.data;
+        return d.keys().hasOnly(['name', 'phone', 'bmdc', 'hospitalId', 'wardId', 'newWardName', 'approved', 'dutyUntil', 'updatedAt'])
+          && d.name is string && d.name.size() >= 2 && d.name.size() <= 60
+          && d.phone is string && d.phone.matches('^01[3-9][0-9]{8}$')
+          && d.bmdc is string && d.bmdc.size() >= 2 && d.bmdc.size() <= 20
+          && d.hospitalId is string && d.hospitalId.size() <= 40
+          && d.wardId is string && d.wardId.size() <= 100
+          && d.newWardName is string && d.newWardName.size() <= 60
+          // Either a ward from the list, or a request for a new one.
+          && (d.wardId.size() > 0 || d.newWardName.size() >= 2)
+          && d.approved is bool
+          && (d.dutyUntil == null
+              || (d.approved == true
+                  && d.dutyUntil is timestamp
+                  && d.dutyUntil <= request.time + duration.value(25, 'h')))
+          && d.updatedAt == request.time;
+      }
 
-      allow create, update: if signedIn() && request.auth.uid == uid
-        && request.resource.data.keys().hasOnly(['name', 'phone', 'hospitalId', 'wardId', 'dutyUntil', 'updatedAt'])
-        && request.resource.data.name is string
-        && request.resource.data.name.size() >= 2
-        && request.resource.data.name.size() <= 60
-        && request.resource.data.phone is string
-        && request.resource.data.phone.matches('^01[3-9][0-9]{8}$')
-        && request.resource.data.hospitalId is string
-        && request.resource.data.hospitalId.size() <= 40
-        && request.resource.data.wardId is string
-        && request.resource.data.wardId.size() >= 1
-        && request.resource.data.wardId.size() <= 100
-        && (request.resource.data.dutyUntil == null
-            || (request.resource.data.dutyUntil is timestamp
-                && request.resource.data.dutyUntil <= request.time + duration.value(25, 'h')))
-        && request.resource.data.updatedAt == request.time;
+      allow get: if signedIn() && (request.auth.uid == uid || isDoctor() || isAdmin());
+      allow list: if isDoctor() || isAdmin();
 
-      allow delete: if signedIn() && request.auth.uid == uid;
+      allow create: if signedIn() && request.auth.uid == uid
+        && validProfile()
+        && request.resource.data.approved == false;
+
+      // A doctor edits their own profile. Approval survives only while name and BMDC number stay the same.
+      allow update: if signedIn() && request.auth.uid == uid
+        && validProfile()
+        && request.resource.data.approved == (resource.data.approved == true
+             && request.resource.data.name == resource.data.name
+             && request.resource.data.bmdc == resource.data.bmdc);
+
+      // Admins approve, revoke (clearing any duty), and assign the ward they created on approval.
+      allow update: if isAdmin()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['approved', 'wardId', 'newWardName', 'dutyUntil'])
+        && request.resource.data.approved is bool
+        && request.resource.data.wardId is string && request.resource.data.wardId.size() <= 100
+        && request.resource.data.newWardName is string && request.resource.data.newWardName.size() <= 60
+        && (request.resource.data.dutyUntil == resource.data.dutyUntil || request.resource.data.dutyUntil == null);
+
+      allow delete: if signedIn() && (request.auth.uid == uid || isAdmin());
     }
   }
 }

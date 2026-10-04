@@ -79,3 +79,22 @@ export function clockTimeWithDay(ts: number, now: number): string {
   const sameDay = a.toDateString() === b.toDateString();
   return sameDay ? clockTime(ts) : `আগামীকাল ${clockTime(ts)}`;
 }
+
+/** "a- ১২৩৪৫" → "A-12345" */
+export function normalizeBmdc(input: string): string {
+  return toEnDigits(input).replace(/\s+/g, '').toUpperCase();
+}
+
+export function isValidBmdc(input: string): boolean {
+  const v = normalizeBmdc(input);
+  return v.length >= 2 && v.length <= 20 && /\d{2,}/.test(v);
+}
+
+/** For matching ward names typed by different people: "মেডিসিন  ইউনিট ৩" == "মেডিসিন ইউনিট 3". */
+export function wardNameKey(name: string): string {
+  return toEnDigits(name).trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+export function cleanWardName(name: string): string {
+  return name.trim().replace(/\s+/g, ' ');
+}

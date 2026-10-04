@@ -1,10 +1,11 @@
 // Demo backend: everything lives in this browser's localStorage.
 // Used when no Firebase config is set, so the app can be clicked through before the project exists.
+// The demo user is also an admin, so the approval flow can be tried end to end.
 
 import { load, save } from '../lib/storage';
 import type { AuthUser, Backend, DoctorProfile, WardDoc } from './types';
 
-const KEY = 'careq-demo-v1';
+const KEY = 'careq-demo-v2';
 const DEMO_UID = 'demo-doctor';
 
 interface DemoState {
@@ -23,13 +24,16 @@ function seed(): DemoState {
     updatedAt: now - agoMin * min,
     updatedByUid: 'demo-a',
   });
-  const doctor = (uid: string, name: string, phone: string, wardId: string): DoctorProfile => ({
+  const doctor = (uid: string, name: string, phone: string, wardId: string, approved = true): DoctorProfile => ({
     uid,
     name,
     phone,
+    bmdc: `A-${phone.slice(-5)}`,
     hospitalId: 'dmch',
     wardId,
-    dutyUntil: now + 6 * 60 * min,
+    newWardName: '',
+    approved,
+    dutyUntil: approved ? now + 6 * 60 * min : null,
   });
   return {
     signedIn: false,
@@ -37,6 +41,7 @@ function seed(): DemoState {
       'demo-a': doctor('demo-a', 'ডা. নুসরাত জাহান (ডেমো)', '01700000001', 'dmch-cardiology'),
       'demo-b': doctor('demo-b', 'ডা. তানভীর হাসান (ডেমো)', '01700000002', 'dmch-neurology'),
       'demo-c': doctor('demo-c', 'ডা. সাবরিনা ইসলাম (ডেমো)', '01700000003', 'dmch-medicine'),
+      'demo-d': doctor('demo-d', 'ডা. মাহমুদ রেজা (ডেমো)', '01700000004', 'dmch-surgery', false),
     },
     wards: Object.fromEntries(
       [
@@ -74,6 +79,12 @@ export function createDemoBackend(): Backend {
 
   const user = (): AuthUser | null => (state.signedIn ? { uid: DEMO_UID, displayName: 'ডেমো ডাক্তার' } : null);
 
+  const patchDoctor = (uid: string, patch: Partial<DoctorProfile>) => {
+    const d = state.doctors[uid];
+    if (!d) throw new Error('No profile');
+    commit({ ...state, doctors: { ...state.doctors, [uid]: { ...d, ...patch } } });
+  };
+
   return {
     mode: 'demo',
 
@@ -93,14 +104,12 @@ export function createDemoBackend(): Backend {
       return subscribe(() => cb(state.doctors[uid] ?? null));
     },
 
-    async saveProfile(uid, input, dutyUntil) {
-      commit({ ...state, doctors: { ...state.doctors, [uid]: { uid, ...input, dutyUntil } } });
+    async saveProfile(uid, input, approved, dutyUntil) {
+      commit({ ...state, doctors: { ...state.doctors, [uid]: { uid, ...input, approved, dutyUntil } } });
     },
 
     async setDuty(uid, dutyUntil) {
-      const d = state.doctors[uid];
-      if (!d) throw new Error('No profile');
-      commit({ ...state, doctors: { ...state.doctors, [uid]: { ...d, dutyUntil } } });
+      patchDoctor(uid, { dutyUntil });
     },
 
     watchWards(hospitalId, cb) {
@@ -124,8 +133,26 @@ export function createDemoBackend(): Backend {
     watchOnDutyDoctors(cb) {
       return subscribe(() => {
         const now = Date.now();
-        cb(Object.values(state.doctors).filter((d) => d.dutyUntil !== null && d.dutyUntil > now));
+        cb(Object.values(state.doctors).filter((d) => d.approved && d.dutyUntil !== null && d.dutyUntil > now));
       });
+    },
+
+    async isAdmin() {
+      return state.signedIn;
+    },
+
+    watchAllDoctors(cb) {
+      return subscribe(() => cb(Object.values(state.doctors)));
+    },
+
+    async adminUpdateDoctor(uid, patch) {
+      patchDoctor(uid, patch);
+    },
+
+    async deleteDoctor(uid) {
+      const doctors = { ...state.doctors };
+      delete doctors[uid];
+      commit({ ...state, doctors });
     },
   };
 }

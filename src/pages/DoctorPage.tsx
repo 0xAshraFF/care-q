@@ -1,18 +1,27 @@
-import { CircleCheck, CircleX, LogOut, Pencil, Search } from 'lucide-react';
+import { CircleCheck, CircleX, Clock, LogOut, Pencil, Search } from 'lucide-react';
 import { useState } from 'react';
 import type { DoctorProfile } from '../backend/types';
+import { AdminPanel } from '../components/AdminPanel';
 import { Field, Notice, PageTitle } from '../components/ui';
 import { DEFAULT_HOSPITAL, HOSPITALS, findHospital } from '../data/hospitals';
-import { clockTimeWithDay, duration, isValidBdMobile, normalizeBdMobile, timeAgo, toEnDigits } from '../lib/bn';
+import {
+  cleanWardName,
+  clockTimeWithDay,
+  duration,
+  formatPhone,
+  isValidBdMobile,
+  isValidBmdc,
+  normalizeBdMobile,
+  normalizeBmdc,
+  timeAgo,
+  toEnDigits,
+  wardNameKey,
+} from '../lib/bn';
 import { endFromTimeInput, isOnDuty, shiftEndChoices } from '../lib/duty';
 import type { Route } from '../lib/hooks';
 import { STALE_AFTER_MS, useApp, useOnDutyDoctors, useWards } from '../state/app';
 
 const NEW_WARD = '__new__';
-
-function normalizeName(s: string): string {
-  return toEnDigits(s).trim().replace(/\s+/g, ' ').toLowerCase();
-}
 
 function SignIn() {
   const { backend, toast } = useApp();
@@ -63,9 +72,10 @@ function ProfileForm({ existing, onDone }: { existing?: DoctorProfile; onDone?: 
   const { backend, user, toast } = useApp();
   const [name, setName] = useState(existing?.name ?? user?.displayName ?? '');
   const [phone, setPhone] = useState(existing?.phone ?? '');
+  const [bmdc, setBmdc] = useState(existing?.bmdc ?? '');
   const [hospitalId, setHospitalId] = useState(existing?.hospitalId ?? DEFAULT_HOSPITAL.id);
-  const [wardId, setWardId] = useState(existing?.wardId ?? '');
-  const [newWard, setNewWard] = useState('');
+  const [wardId, setWardId] = useState(existing ? existing.wardId || (existing.newWardName ? NEW_WARD : '') : '');
+  const [newWard, setNewWard] = useState(existing?.newWardName ?? '');
   const [busy, setBusy] = useState(false);
   const { wards } = useWards(hospitalId);
 
@@ -74,26 +84,47 @@ function ProfileForm({ existing, onDone }: { existing?: DoctorProfile; onDone?: 
       ? 'আপনার নাম লিখুন।'
       : !isValidBdMobile(phone)
         ? 'সঠিক মোবাইল নম্বর দিন (01 দিয়ে শুরু, ১১ সংখ্যা)।'
-        : wardId === ''
-          ? 'ওয়ার্ড বেছে নিন।'
-          : wardId === NEW_WARD && newWard.trim().length < 2
-            ? 'ওয়ার্ডের নাম লিখুন।'
-            : null;
+        : !isValidBmdc(bmdc)
+          ? 'বিএমডিসি রেজিস্ট্রেশন নম্বর দিন।'
+          : wardId === ''
+            ? 'ওয়ার্ড বেছে নিন।'
+            : wardId === NEW_WARD && newWard.trim().length < 2
+              ? 'ওয়ার্ডের নাম লিখুন।'
+              : null;
+
+  // Approval is for this name and BMDC number; changing either sends the profile back for review.
+  const keepsApproval =
+    existing?.approved === true && existing.name === name.trim() && existing.bmdc === normalizeBmdc(bmdc);
 
   const submit = async () => {
     if (!backend || !user || missing) return;
     setBusy(true);
     try {
       let id = wardId;
+      let requested = '';
       if (wardId === NEW_WARD) {
-        const name = newWard.trim().replace(/\s+/g, ' ');
-        const same = wards.find((w) => normalizeName(w.nameBn) === normalizeName(name));
-        id = same ? same.id : await backend.addWard(user.uid, hospitalId, name);
+        const wardName = cleanWardName(newWard);
+        const same = wards.find((w) => wardNameKey(w.nameBn) === wardNameKey(wardName));
+        if (same) id = same.id;
+        else if (keepsApproval) id = await backend.addWard(user.uid, hospitalId, wardName);
+        else {
+          // Not approved yet: the admin creates this ward when approving.
+          id = '';
+          requested = wardName;
+        }
       }
       await backend.saveProfile(
         user.uid,
-        { name: name.trim(), phone: normalizeBdMobile(phone), hospitalId, wardId: id },
-        existing?.dutyUntil ?? null,
+        {
+          name: name.trim(),
+          phone: normalizeBdMobile(phone),
+          bmdc: normalizeBmdc(bmdc),
+          hospitalId,
+          wardId: id,
+          newWardName: requested,
+        },
+        keepsApproval,
+        keepsApproval ? (existing?.dutyUntil ?? null) : null,
       );
       toast('সেভ হয়েছে');
       onDone?.();
@@ -108,7 +139,7 @@ function ProfileForm({ existing, onDone }: { existing?: DoctorProfile; onDone?: 
     <>
       <PageTitle
         title={existing ? 'আপনার তথ্য' : 'একবার নিজের তথ্য দিন'}
-        subtitle="পরের বার থেকে শুধু লগইন করলেই হবে।"
+        subtitle={existing ? undefined : 'যাচাই করে অনুমোদন দেওয়া হবে। পরের বার থেকে শুধু লগইন করলেই হবে।'}
       />
       <form
         className="card space-y-5"
@@ -120,7 +151,7 @@ function ProfileForm({ existing, onDone }: { existing?: DoctorProfile; onDone?: 
         <Field label="আপনার নাম" htmlFor="doc-name">
           <input id="doc-name" className="input" placeholder="যেমন: ডা. রাশেদ করিম" value={name} onChange={(e) => setName(e.target.value)} />
         </Field>
-        <Field label="মোবাইল নম্বর" htmlFor="doc-phone" hint="শুধু লগইন করা ডাক্তাররা এই নম্বর দেখবেন, তাও আপনি ডিউটিতে থাকলে।">
+        <Field label="মোবাইল নম্বর" htmlFor="doc-phone" hint="শুধু অনুমোদিত ডাক্তাররা এই নম্বর দেখবেন, তাও আপনি ডিউটিতে থাকলে।">
           <input
             id="doc-phone"
             className="input tabular-nums"
@@ -130,6 +161,18 @@ function ProfileForm({ existing, onDone }: { existing?: DoctorProfile; onDone?: 
             placeholder="01XXXXXXXXX"
             value={phone}
             onChange={(e) => setPhone(toEnDigits(e.target.value))}
+          />
+        </Field>
+        <Field label="বিএমডিসি রেজিস্ট্রেশন নম্বর" htmlFor="doc-bmdc" hint="যাচাইয়ের জন্য লাগবে।">
+          <input
+            id="doc-bmdc"
+            className="input tabular-nums"
+            autoCapitalize="characters"
+            autoComplete="off"
+            placeholder="যেমন: A-12345"
+            maxLength={20}
+            value={bmdc}
+            onChange={(e) => setBmdc(toEnDigits(e.target.value))}
           />
         </Field>
         {HOSPITALS.length > 1 && (
@@ -174,6 +217,9 @@ function ProfileForm({ existing, onDone }: { existing?: DoctorProfile; onDone?: 
             />
           </Field>
         )}
+        {existing?.approved && !keepsApproval && missing === null && (
+          <Notice tone="warn">নাম বা বিএমডিসি নম্বর বদলালে আবার অনুমোদন লাগবে।</Notice>
+        )}
         {missing && <p className="text-[15px] font-medium text-warn-700">{missing}</p>}
         <div className="flex gap-2">
           {onDone && (
@@ -182,11 +228,37 @@ function ProfileForm({ existing, onDone }: { existing?: DoctorProfile; onDone?: 
             </button>
           )}
           <button type="submit" className="btn btn-primary flex-1" disabled={busy || missing !== null}>
-            সেভ করুন
+            {existing ? 'সেভ করুন' : 'জমা দিন'}
           </button>
         </div>
       </form>
     </>
+  );
+}
+
+function PendingCard({ profile }: { profile: DoctorProfile }) {
+  const { wards } = useWards(profile.hospitalId);
+  const ward = profile.wardId
+    ? (wards.find((w) => w.id === profile.wardId)?.nameBn ?? '…')
+    : `${profile.newWardName} (নতুন)`;
+  return (
+    <section className="card space-y-3 border-[#f3dfb4] bg-warn-50">
+      <p className="flex items-center gap-2 font-semibold text-warn-700">
+        <Clock size={20} /> অনুমোদনের অপেক্ষায়
+      </p>
+      <p className="text-[16px] text-ink-700">
+        আপনার তথ্য জমা হয়েছে। অ্যাডমিন ফোনে যাচাই করে অনুমোদন দিলে নিজের ওয়ার্ডের অবস্থা জানাতে আর অন্য
+        ডাক্তারদের নম্বর দেখতে পারবেন। অনুমোদন হলে এই পাতা নিজে থেকেই বদলে যাবে।
+      </p>
+      <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 rounded-xl bg-white px-3.5 py-3 text-[15px]">
+        <dt className="text-ink-500">মোবাইল</dt>
+        <dd className="tabular-nums">{formatPhone(profile.phone)}</dd>
+        <dt className="text-ink-500">বিএমডিসি</dt>
+        <dd>{profile.bmdc}</dd>
+        <dt className="text-ink-500">ওয়ার্ড</dt>
+        <dd>{ward}</dd>
+      </dl>
+    </section>
   );
 }
 
@@ -350,18 +422,70 @@ function MyWardCard({ profile }: { profile: DoctorProfile }) {
 }
 
 export function DoctorPage({ go }: { go: (r: Route) => void }) {
-  const { backend, authReady, user, profile, now, endDutyAndSignOut } = useApp();
+  const { backend, authReady, user, profile, now, isAdmin, adminChecked, endDutyAndSignOut } = useApp();
   const [editing, setEditing] = useState(false);
+  const [joining, setJoining] = useState(false);
   const { wards } = useWards(profile?.hospitalId ?? DEFAULT_HOSPITAL.id);
 
-  if (!backend || !authReady || (user && profile === undefined)) {
+  if (!backend || !authReady || (user && (profile === undefined || !adminChecked))) {
     return <p className="card text-ink-500">লোড হচ্ছে…</p>;
   }
   if (!user) return <SignIn />;
-  if (!profile) return <ProfileForm />;
-  if (editing) return <ProfileForm existing={profile} onDone={() => setEditing(false)} />;
+  if (editing && profile) return <ProfileForm existing={profile} onDone={() => setEditing(false)} />;
+
+  const footer = (
+    <div className="flex justify-between pt-2">
+      {profile ? (
+        <button type="button" className="btn-ghost btn px-3" onClick={() => setEditing(true)}>
+          <Pencil size={18} /> তথ্য বদলান
+        </button>
+      ) : (
+        <span />
+      )}
+      <button
+        type="button"
+        className="btn-ghost btn px-3 text-ink-500"
+        onClick={() => void (profile && isOnDuty(profile.dutyUntil, now) ? endDutyAndSignOut() : backend.signOut())}
+      >
+        <LogOut size={18} /> লগ আউট
+      </button>
+    </div>
+  );
+
+  // Signed in, no doctor profile: an admin who isn't a doctor, or a doctor registering.
+  if (!profile) {
+    if (isAdmin && !joining) {
+      return (
+        <>
+          <PageTitle title="অ্যাডমিন" subtitle="নতুন ডাক্তারকে ফোন করে বিএমডিসি নম্বর ও ওয়ার্ড মিলিয়ে অনুমোদন দিন।" />
+          <div className="space-y-4">
+            <AdminPanel />
+            <button type="button" className="btn btn-soft w-full" onClick={() => setJoining(true)}>
+              নিজেও ডাক্তার হিসেবে যোগ দিন
+            </button>
+            {footer}
+          </div>
+        </>
+      );
+    }
+    return <ProfileForm onDone={isAdmin ? () => setJoining(false) : undefined} />;
+  }
 
   const hospital = findHospital(profile.hospitalId) ?? DEFAULT_HOSPITAL;
+
+  if (!profile.approved) {
+    return (
+      <>
+        <PageTitle title={profile.name} subtitle={hospital.shortBn} />
+        <div className="space-y-4">
+          <PendingCard profile={profile} />
+          {isAdmin && <AdminPanel />}
+          {footer}
+        </div>
+      </>
+    );
+  }
+
   const ward = wards.find((w) => w.id === profile.wardId);
 
   return (
@@ -373,18 +497,12 @@ export function DoctorPage({ go }: { go: (r: Route) => void }) {
         <button type="button" className="btn btn-soft w-full" onClick={() => go('ward')}>
           <Search size={20} /> রেফারের আগে অন্য ওয়ার্ডে সিট দেখুন
         </button>
-        <div className="flex justify-between pt-2">
-          <button type="button" className="btn-ghost btn px-3" onClick={() => setEditing(true)}>
-            <Pencil size={18} /> তথ্য বদলান
-          </button>
-          <button
-            type="button"
-            className="btn-ghost btn px-3 text-ink-500"
-            onClick={() => void (isOnDuty(profile.dutyUntil, now) ? endDutyAndSignOut() : backend.signOut())}
-          >
-            <LogOut size={18} /> লগ আউট
-          </button>
-        </div>
+        {isAdmin && (
+          <div className="pt-4">
+            <AdminPanel />
+          </div>
+        )}
+        {footer}
       </div>
     </>
   );

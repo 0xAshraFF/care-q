@@ -63,7 +63,7 @@ function WardDetail({ ward, hospital }: { ward: WardView; hospital: Hospital }) 
 }
 
 export function WardsPage({ go }: { go: (r: Route) => void }) {
-  const { isDoctor } = useApp();
+  const { user } = useApp();
   const hospital = DEFAULT_HOSPITAL;
   const { wards, loaded, error } = useWards(hospital.id);
   const [selectedId, setSelectedId] = useStoredState<string>('careq-ward', '');
@@ -144,7 +144,7 @@ export function WardsPage({ go }: { go: (r: Route) => void }) {
         )}
       </section>
 
-      {!isDoctor && (
+      {!user && (
         <button
           type="button"
           onClick={() => go('doctor')}

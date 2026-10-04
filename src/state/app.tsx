@@ -26,7 +26,11 @@ interface AppState {
   user: AuthUser | null;
   /** undefined while loading, null when signed in but not registered yet. */
   profile: DoctorProfile | null | undefined;
+  /** Registered and approved by an admin. Pending doctors are treated like patients. */
   isDoctor: boolean;
+  isAdmin: boolean;
+  /** False until the admin check for the signed-in user has finished. */
+  adminChecked: boolean;
   toast: (msg: string) => void;
   endDutyAndSignOut: () => Promise<void>;
 }
@@ -48,6 +52,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [authReady, setAuthReady] = useState(false);
   const [user, setUser] = useState<AuthUser | null>(null);
   const [profile, setProfile] = useState<DoctorProfile | null | undefined>(undefined);
+  const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const now = useNow(30_000);
 
@@ -58,7 +63,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (cancelled) return;
       setBackend(b);
       off = b.onAuth((u) => {
-        setUser(u);
+        // Keep the same object for the same user so profile/admin listeners don't restart.
+        setUser((prev) => (prev?.uid === u?.uid && prev?.displayName === u?.displayName ? prev : u));
         setAuthReady(true);
       });
     });
@@ -75,6 +81,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
     setProfile(undefined);
     return backend.watchProfile(user.uid, setProfile, () => setProfile(null));
+  }, [backend, user]);
+
+  useEffect(() => {
+    setIsAdmin(null);
+    if (!backend || !user) return;
+    let cancelled = false;
+    backend.isAdmin().then((a) => !cancelled && setIsAdmin(a));
+    return () => {
+      cancelled = true;
+    };
   }, [backend, user]);
 
   const toastTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -109,11 +125,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
       authReady,
       user,
       profile,
-      isDoctor: Boolean(user && profile),
+      isDoctor: Boolean(user && profile?.approved),
+      isAdmin: isAdmin === true,
+      adminChecked: !user || isAdmin !== null,
       toast,
       endDutyAndSignOut,
     }),
-    [backend, now, authReady, user, profile, toast, endDutyAndSignOut],
+    [backend, now, authReady, user, profile, isAdmin, toast, endDutyAndSignOut],
   );
 
   return (
