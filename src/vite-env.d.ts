@@ -7,8 +7,14 @@ interface ImportMetaEnv {
   readonly VITE_FIREBASE_STORAGE_BUCKET: string;
   readonly VITE_FIREBASE_MESSAGING_SENDER_ID: string;
   readonly VITE_FIREBASE_APP_ID: string;
+  readonly VITE_FIREBASE_EMULATOR?: string;
 }
 
 interface ImportMeta {
   readonly env: ImportMetaEnv;
+}
+
+interface Window {
+  /** Set only in emulator mode (VITE_FIREBASE_EMULATOR=1), for end-to-end tests. */
+  __careqEmulatorSignIn?: (email: string, name: string) => Promise<void>;
 }

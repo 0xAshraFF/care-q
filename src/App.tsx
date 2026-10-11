@@ -27,7 +27,9 @@ function Shell() {
   } else if (mode === 'patient') {
     tabs = PATIENT;
   }
-  const home: Route = tabs === DOCTOR ? 'ward' : tabs === PENDING ? 'doctor' : 'blood';
+  // The app admin who isn't a doctor is here to approve people: their home is the approval list.
+  const home: Route =
+    tabs === DOCTOR ? (profile ? 'ward' : 'doctor') : tabs === PENDING ? 'doctor' : 'blood';
   const active: Route = tabs.length === 0 ? 'doctor' : tabs.includes(route) ? route : home;
 
   // When the role changes (signed up, approved, logged out), land on that role's home tab.

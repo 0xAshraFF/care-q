@@ -1,8 +1,10 @@
 import { initializeApp } from 'firebase/app';
 import {
   GoogleAuthProvider,
+  connectAuthEmulator,
   getAuth,
   onAuthStateChanged,
+  signInWithCredential,
   signInWithPopup,
   signInWithRedirect,
   signOut as fbSignOut,
@@ -11,6 +13,7 @@ import {
   Timestamp,
   addDoc,
   collection,
+  connectFirestoreEmulator,
   deleteDoc,
   doc,
   getDoc,
@@ -79,13 +82,26 @@ function toTransfer(id: string, d: DocumentData): Transfer {
   };
 }
 
-export function createFirebaseBackend(config: FirebaseConfig): Backend {
+/** Local Firebase emulators (`npm run dev:emulators`, end-to-end tests). */
+export const EMULATOR_HOSTS = { auth: 'http://127.0.0.1:9099', firestore: ['127.0.0.1', 8080] as const };
+
+export function createFirebaseBackend(config: FirebaseConfig, opts: { emulators?: boolean } = {}): Backend {
   const app = initializeApp(config);
   const auth = getAuth(app);
   // Offline cache: wards keep showing the last known status on a bad connection.
   const db = initializeFirestore(app, {
     localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
   });
+  if (opts.emulators) {
+    connectAuthEmulator(auth, EMULATOR_HOSTS.auth, { disableWarnings: true });
+    connectFirestoreEmulator(db, ...EMULATOR_HOSTS.firestore);
+    // Emulator only: sign in as a fake Google user without the popup, which needs apis.google.com.
+    // Used by the end-to-end tests; the auth emulator accepts an unsigned JSON "ID token".
+    window.__careqEmulatorSignIn = async (email: string, name: string) => {
+      const token = JSON.stringify({ sub: email, email, email_verified: true, name });
+      await signInWithCredential(auth, GoogleAuthProvider.credential(token));
+    };
+  }
   const provider = new GoogleAuthProvider();
   provider.setCustomParameters({ prompt: 'select_account' });
 

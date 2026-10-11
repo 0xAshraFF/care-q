@@ -10,7 +10,9 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "icons": "node scripts/make-icons.mjs",
-    "test:rules": "npx -y firebase-tools@15 emulators:exec --only firestore --project demo-careq \"vitest run --config vitest.rules.config.ts\""
+    "test:rules": "npx -y firebase-tools@15 emulators:exec --only firestore --project demo-careq \"vitest run --config vitest.rules.config.ts\"",
+    "dev:emulators": "npx -y firebase-tools@15 emulators:exec --only auth,firestore --project demo-careq \"VITE_FIREBASE_EMULATOR=1 vite\"",
+    "test:e2e": "npx -y firebase-tools@15 emulators:exec --only auth,firestore --project demo-careq \"node tests/e2e/firebase-flow.mjs\""
   },
   "dependencies": {
     "@fontsource/hind-siliguri": "^5.3.0",
@@ -25,6 +27,7 @@
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.1",
+    "playwright": "^1.56.1",
     "sharp": "^0.35.5",
     "tailwindcss": "^4.3.3",
     "typescript": "^7.0.2",

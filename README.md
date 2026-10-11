@@ -30,6 +30,16 @@ Without Firebase config, the app runs in **demo mode** with a yellow banner. All
 - Your sign-up is approved about 5 seconds later. If you signed up as an in-charge, a doctor of your ward then asks to join, so you can approve them.
 - A referral arrives a few seconds after you open your ward, and referrals you send are answered about 6 seconds later.
 
+To run the **real Firebase code** locally without a project, use the emulators (needs Java 21):
+
+```bash
+npm run dev:emulators   # app on http://localhost:5173 against local Firebase login + database
+```
+
+In emulator mode the Google popup can't open offline, so sign in from the browser console with
+`__careqEmulatorSignIn('you@example.com', 'Your Name')`. To make that account the app admin, add its
+email to `config/admins` (see step 6 below) through the emulator's REST API, as `tests/e2e/firebase-flow.mjs` does.
+
 ## Connect Firebase
 
 1. Create a project at <https://console.firebase.google.com> (the free Spark plan is enough).
@@ -68,8 +78,13 @@ The rules live in `firestore.rules`. They also check phone format, block going o
 ```bash
 npm test            # formatting, shift times, generated posts, ward merging
 npm run test:rules  # security rules against the Firestore emulator (needs Java 21): 34 cases
+npm run test:e2e    # five people in real browsers against the Firebase emulators: sign-up,
+                    # approvals, ward status, referrals, profile edits, logout (needs Java 21)
 npm run typecheck
 ```
+
+The end-to-end test signs in through an emulator-only shortcut because Google's sign-in popup needs
+`apis.google.com`. So the popup itself is the one step to check by hand on a phone, against the real project.
 
 GitHub Actions runs all of these on every push and pull request (`.github/workflows/ci.yml`).
 
